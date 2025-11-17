@@ -38,7 +38,7 @@
  
 | 功能模块 | 说明 | 技术实现 |
 |---------|------|---------|
-| **全参微调** | 爬取和收集数据微调大模型 |  [网盘地址](https://pan.baidu.com/s/1vTYbUJb2feUQkb4hJdx7pg?pwd=zts4) |
+| **全参微调** | 爬取和收集数据微调大模型 |  [微调厨神模型](https://pan.baidu.com/s/1vTYbUJb2feUQkb4hJdx7pg?pwd=zts4) |
 | **智能路由** | 自动识别问题类型，路由到合适的处理模块 | 启发式路由 + LLM 结构化输出 |
 | **知识库查询** | 支持历史文化、菜谱典故等知识查询 | Milvus + PostgreSQL pgvector + Reranker |
 | **图谱推理** | 基于 Neo4j 的菜谱关系推理 | Cypher 动态生成 + Few-shot 示例检索 |
