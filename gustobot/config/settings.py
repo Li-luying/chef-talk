@@ -1,7 +1,6 @@
 """
 Centralised application settings for GustoBot.
 """
-from __future__ import annotations
 
 from typing import List, Optional, Tuple
 
@@ -14,7 +13,7 @@ class Settings(BaseSettings):
 
     # Application metadata
     APP_NAME: str = "GustoBot"
-    APP_VERSION: str = "0.1.1"
+    APP_VERSION: str = "0.1.2"
     DEBUG: bool = True
 
     # API configuration

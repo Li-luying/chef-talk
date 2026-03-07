@@ -6,7 +6,6 @@ They only verify that we keep stable public-facing interfaces (routes/env vars)
 even as internals evolve.
 """
 
-from __future__ import annotations
 
 import sys
 from pathlib import Path

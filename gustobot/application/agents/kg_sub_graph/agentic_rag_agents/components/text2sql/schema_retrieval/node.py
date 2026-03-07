@@ -4,7 +4,6 @@ Schema retrieval node.
 Fetches tables, columns, and relationships directly from MySQL INFORMATION_SCHEMA.
 简化实现，不再依赖 Neo4j，直接从 MySQL 数据库读取表结构。
 """
-from __future__ import annotations
 
 import re
 from typing import Any, Callable, Coroutine, Dict, Iterable, List, Set, Tuple

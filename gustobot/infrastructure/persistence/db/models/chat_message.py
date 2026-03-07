@@ -1,7 +1,6 @@
 """
 Chat message model for storing individual messages within a session.
 """
-from __future__ import annotations
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, String, Text, func
 from sqlalchemy.orm import relationship

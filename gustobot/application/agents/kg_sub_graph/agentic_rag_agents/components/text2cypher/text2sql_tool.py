@@ -4,7 +4,6 @@ Text2SQL tool wrapper for the multi-tool workflow.
 This node bridges the planner/tool-selection workflow with the
 Text2SQL LangGraph pipeline implemented under ``gustobot.application.agents.text2sql``.
 """
-from __future__ import annotations
 
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 

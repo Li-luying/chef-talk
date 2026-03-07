@@ -6,7 +6,6 @@ Some CI/runner setups use `--import-mode=importlib` or otherwise do not add the 
 to `sys.path` consistently, so we do it explicitly here.
 """
 
-from __future__ import annotations
 
 import sys
 from pathlib import Path

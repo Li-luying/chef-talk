@@ -1,7 +1,6 @@
 """
 Utility helpers to bootstrap the recipe knowledge graph from JSON sources.
 """
-from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional

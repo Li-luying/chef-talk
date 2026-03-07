@@ -6,7 +6,6 @@ They only validate deterministic transforms from source data -> recipe payloads
 that the HTTP API accepts.
 """
 
-from __future__ import annotations
 
 import sys
 from pathlib import Path

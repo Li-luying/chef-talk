@@ -1,5 +1,4 @@
 """Reranker integration supporting multiple providers."""
-from __future__ import annotations
 
 import asyncio
 import httpx

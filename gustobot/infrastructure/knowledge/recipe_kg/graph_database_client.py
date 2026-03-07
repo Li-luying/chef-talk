@@ -3,7 +3,6 @@ Neo4j数据库客户端封装
 Simplified wrapper around the official neo4j driver to provide a small API
 surface for the KBQA pipeline.
 """
-from __future__ import annotations
 
 from contextlib import contextmanager
 from typing import Any, Dict, Iterable, List, Optional

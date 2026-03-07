@@ -7,7 +7,6 @@ in this module. The implementation has since moved under
 imports we re-export the canonical components and workflows from the new
 package while keeping the public API identical.
 """
-from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 

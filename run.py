@@ -4,7 +4,6 @@ Convenience wrapper to keep legacy commands working.
 The actual CLI lives in `scripts/run.py`, but many docs reference `python run.py ...`.
 """
 
-from __future__ import annotations
 
 import runpy
 from pathlib import Path

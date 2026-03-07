@@ -3,7 +3,6 @@ Chat session models for persistent conversation storage.
 
 Lightweight user ID system - no authentication, just user identification.
 """
-from __future__ import annotations
 
 from sqlalchemy import Boolean, Column, DateTime, String, func
 from sqlalchemy.orm import relationship

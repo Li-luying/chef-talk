@@ -1,5 +1,4 @@
 """Knowledge base service implemented with LangChain primitives."""
-from __future__ import annotations
 
 import asyncio
 from typing import Any, Dict, List, Optional

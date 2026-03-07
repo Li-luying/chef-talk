@@ -4,7 +4,6 @@ Deterministic helpers for importing recipe-like data into the KB API.
 This module must stay pure (no Milvus/LLM calls) so it can be tested offline.
 """
 
-from __future__ import annotations
 
 import re
 from typing import Any, Dict, List, Optional

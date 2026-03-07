@@ -1,7 +1,6 @@
 """
 Main KBQA pipeline wiring the classifier, parser and answer searcher together.
 """
-from __future__ import annotations
 
 from typing import Any, Dict
 

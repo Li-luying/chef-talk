@@ -1,7 +1,6 @@
 """
 Execute generated Cypher queries and format answers for the API response.
 """
-from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List
 

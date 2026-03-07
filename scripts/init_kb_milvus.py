@@ -1,7 +1,6 @@
 ﻿"""
 Utility script to seed the Milvus vector store with initial knowledge base text.
 """
-from __future__ import annotations
 
 import asyncio
 import os

@@ -1,7 +1,6 @@
 """
 Shared data parsing utilities for recipe knowledge graph bootstrapping.
 """
-from __future__ import annotations
 
 import json
 import re

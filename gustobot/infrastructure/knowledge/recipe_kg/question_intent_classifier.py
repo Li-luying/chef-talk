@@ -1,7 +1,6 @@
 """
 Keyword based question classifier for the Neo4j KBQA pipeline.
 """
-from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib import resources

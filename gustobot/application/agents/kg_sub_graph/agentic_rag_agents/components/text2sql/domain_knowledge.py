@@ -9,7 +9,6 @@ We surface them to the LLM prompts so that the model has grounded context
 about the actual tables, columns, and relationships available in the
 recipe management database.
 """
-from __future__ import annotations
 
 from typing import Dict, List, Tuple
 

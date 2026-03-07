@@ -5,7 +5,6 @@ Agent 路由测试脚本
 执行方式：python -m tests.test_agent_routing
 """
 
-from __future__ import annotations
 
 import os
 

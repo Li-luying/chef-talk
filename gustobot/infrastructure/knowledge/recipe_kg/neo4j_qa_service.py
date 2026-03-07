@@ -1,7 +1,6 @@
 """
 High level service exposing graph and QA operations backed by Neo4j.
 """
-from __future__ import annotations
 
 import atexit
 from pathlib import Path

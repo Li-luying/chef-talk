@@ -1,7 +1,6 @@
 """
 Graph loading and caching helpers for Neo4j projections.
 """
-from __future__ import annotations
 
 import json
 from pathlib import Path

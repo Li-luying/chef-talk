@@ -7,7 +7,6 @@ endpoint. We intentionally avoid depending on LangChain abstractions here so
 that we can fine-tune the request payload for vendors that only support a
 subset of OpenAI parameters (e.g., DashScope).
 """
-from __future__ import annotations
 
 from typing import List, Optional, Sequence
 

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """测试 Heuristic Router 关键词兜底机制"""
-from __future__ import annotations
 
 import os
 

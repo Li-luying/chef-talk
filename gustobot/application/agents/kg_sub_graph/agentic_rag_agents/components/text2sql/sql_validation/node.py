@@ -1,7 +1,6 @@
 """
 SQL validation node.
 """
-from __future__ import annotations
 
 from typing import Any, Callable, Coroutine, Dict, List
 

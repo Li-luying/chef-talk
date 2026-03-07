@@ -1,6 +1,6 @@
 [project]
 name = "gustobot"
-version = "0.1.1"
+version = "0.1.2"
 description = "智能菜谱客服系统 - Multi-Agent架构"
 authors = [
     {name = "Your Name", email = "your.email@example.com"}

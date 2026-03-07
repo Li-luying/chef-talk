@@ -6,7 +6,6 @@ Example:
   python scripts/import_recipes.py --file data/recipe.json --batch-size 100
 """
 
-from __future__ import annotations
 
 import argparse
 import json

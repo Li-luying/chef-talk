@@ -5,7 +5,6 @@ Docs reference:
   python -m gustobot.crawler.cli wikipedia --query "川菜" --import-kb --limit 10
 """
 
-from __future__ import annotations
 
 import argparse
 import json

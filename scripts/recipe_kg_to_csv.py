@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Convert recipe JSON datasets into Neo4j-admin compatible CSV files."""
-from __future__ import annotations
 
 import argparse
 import csv

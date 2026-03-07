@@ -11,7 +11,6 @@ implemented as LangGraph nodes:
 6. Visualization recommendation
 7. Answer formatting
 """
-from __future__ import annotations
 
 from typing import Literal
 

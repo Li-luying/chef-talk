@@ -1,7 +1,6 @@
 """
 Translate classifier output into concrete cypher queries.
 """
-from __future__ import annotations
 
 from typing import Dict, List
 

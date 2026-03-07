@@ -6,7 +6,6 @@
 2. 所有原始字段存储在 JSONB metadata 中
 3. 支持任意表结构，无需修改代码
 """
-from __future__ import annotations
 
 import json
 import logging

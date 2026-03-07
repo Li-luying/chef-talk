@@ -4,7 +4,6 @@ Convenience wrapper to keep legacy commands working.
 The maintained entrypoint is `scripts/start_chatbot.py`.
 """
 
-from __future__ import annotations
 
 import runpy
 from pathlib import Path
