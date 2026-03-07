@@ -53,22 +53,21 @@ os.makedirs(uploads_dir, exist_ok=True)
 # 挂载静态文件
 application.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
-# 挂载前端静态文件
-web_dir = os.path.join(os.path.dirname(__file__), "..", "..", "web")
-if os.path.exists(web_dir):
-    application.mount("/static", StaticFiles(directory=web_dir), name="static")
+@application.get("/")
+async def root_redirect():
+    """Redirect to API docs.
 
-    @application.get("/")
-    async def read_index():
-        """重定向到聊天页面"""
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse(url="/static/chatbot/")
+    The web UI is a separate Vite app under `web/` and is typically run via `npm run dev`.
+    """
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/docs")
 
-    @application.get("/favicon.ico")
-    async def favicon():
-        """返回favicon"""
-        from fastapi.responses import Response
-        return Response(content=b"", media_type="image/x-icon")
+
+@application.get("/favicon.ico")
+async def favicon():
+    """Return an empty favicon to avoid noisy 404s in dev."""
+    from fastapi.responses import Response
+    return Response(content=b"", media_type="image/x-icon")
 
 
 @application.get("/api")

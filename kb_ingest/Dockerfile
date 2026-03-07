@@ -19,8 +19,8 @@ COPY requirements.txt .
 RUN python -m pip install --upgrade pip -i https://mirrors.ustc.edu.cn/pypi/simple \
  && pip install -r requirements.txt -i https://mirrors.ustc.edu.cn/pypi/simple
 
-# 复制.env文件
-COPY .env .env
+# `.env` is supplied at runtime via docker-compose `env_file` / environment variables.
+# Do not bake secrets into the image, and avoid build failures when the file is absent.
 
 # 源码
 COPY kb_service ./kb_service

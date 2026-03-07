@@ -15,6 +15,5 @@
   --port 8000 \
   --max-model-len 16384 \
   --served-model-name "Qwen3-30B-A3B-Instruct-2507-FP16" \
-  --api-key mrZqkvMiT4QjKa3H \
+  --api-key ${LLM_API_KEY:-your_api_key_here} \
   --enable-expert-parallel
-

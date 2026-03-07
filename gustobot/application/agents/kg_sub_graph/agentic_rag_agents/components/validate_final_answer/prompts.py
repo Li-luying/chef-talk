@@ -1,4 +1,4 @@
-from langchain.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
 
 
 def create_validate_final_answer_prompt_template() -> ChatPromptTemplate:

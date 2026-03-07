@@ -82,16 +82,34 @@ async def save_message(db: Session, session_id: str, message: str, is_user: bool
                        route: Optional[str] = None, metadata: Optional[Dict] = None):
     """Save message to database"""
     try:
+        last_message = chat_message.get_latest_by_session(db, session_id=session_id)
+        next_order_index = (last_message.order_index + 1) if last_message else 1
+
+        message_metadata: Dict[str, Any] = {}
+        if isinstance(metadata, dict):
+            # Avoid persisting huge/unstable objects (e.g. full agent graph state).
+            message_metadata.update({k: v for k, v in metadata.items() if k != "agent_state"})
+        elif metadata is not None:
+            message_metadata["metadata"] = str(metadata)
+
+        if route:
+            message_metadata["route"] = route
+
         message_data = ChatMessageCreate(
             session_id=session_id,
-            message=message,
-            is_user=is_user,
-            route=route,
-            metadata=metadata or {}
+            message_type="user_query" if is_user else "agent_response",
+            content=message,
+            message_metadata=message_metadata or None,
+            order_index=next_order_index,
         )
-        chat_message.create(db, obj_in=message_data)
+        created = chat_message.create(db, obj_in=message_data)
+
+        # Update session activity timestamp so session list ordering stays correct.
+        chat_session.update_activity(db, session_id=session_id)
+        return str(created.id)
     except Exception as e:
         logger.error(f"Failed to save message: {e}")
+        return None
 
 
 async def process_agent_query(message: str, session_id: str,
@@ -278,6 +296,23 @@ async def chat(
     )
 
 
+# ---------------------------------------------------------------------------
+# Legacy alias routes (backwards compatibility)
+#
+# Older docs/scripts use `/api/v1/chat/chat` and `/api/v1/chat/chat/stream`.
+# Keep them working to reduce migration friction.
+# ---------------------------------------------------------------------------
+
+
+@router.post("/chat", response_model=ChatResponse, include_in_schema=False)
+async def chat_legacy(
+    request: ChatRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> ChatResponse:
+    return await chat(request, background_tasks, db)
+
+
 @router.post("/stream")
 async def chat_stream(
     request: ChatRequest,
@@ -316,6 +351,36 @@ async def chat_stream(
             "X-Accel-Buffering": "no"  # Disable nginx buffering
         }
     )
+
+
+@router.post("/chat/stream", include_in_schema=False)
+async def chat_stream_legacy_post(
+    request: ChatRequest,
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    return await chat_stream(request, db)
+
+
+@router.get("/chat/stream", include_in_schema=False)
+async def chat_stream_legacy_get(
+    message: str = Query(..., min_length=1, max_length=5000),
+    session_id: Optional[str] = Query(None),
+    user_id: Optional[str] = Query("default_user"),
+    image_path: Optional[str] = Query(None),
+    file_path: Optional[str] = Query(None),
+    ingest_incremental: Optional[bool] = Query(None),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    request = ChatRequest(
+        message=message,
+        session_id=session_id,
+        user_id=user_id,
+        stream=True,
+        image_path=image_path,
+        file_path=file_path,
+        ingest_incremental=ingest_incremental,
+    )
+    return await chat_stream(request, db)
 
 
 @router.get("/history/{session_id}", response_model=List[ChatMessageResponse])

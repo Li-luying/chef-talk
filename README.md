@@ -170,7 +170,7 @@ npm install
 npm run dev
 
 # 访问应用
-# 前端: http://localhost:3000
+# 前端: http://localhost:5173 （可通过 VITE_PORT 修改端口）
 # 后端API: http://localhost:8000
 ```
  

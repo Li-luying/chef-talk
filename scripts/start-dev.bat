@@ -1,7 +1,9 @@
 @echo off
 REM GustoBot 开发环境启动脚本 (Windows)
 
-echo ��� GustoBot 智能菜谱助手
+cd /d %~dp0..
+
+echo GustoBot 智能菜谱助手
 echo ==========================
 echo.
 
@@ -37,7 +39,7 @@ goto invalid
 
 :docker
 echo.
-echo ��� 使用 Docker Compose 启动所有服务...
+echo 使用 Docker Compose 启动所有服务...
 echo.
 
 REM 检查 .env 文件
@@ -48,18 +50,18 @@ if not exist .env (
 )
 
 REM 启动服务
-docker-compose -f docker-compose.dev.yml up -d
+docker-compose -f docker-compose.yml up -d
 
 echo.
 echo ✅ 服务启动成功！
 echo.
 echo 访问地址：
-echo   • 前端: http://localhost:3000
 echo   • 后端: http://localhost:8000
 echo   • API文档: http://localhost:8000/docs
+echo   • Neo4j: http://localhost:17474
 echo.
-echo 查看日志: docker-compose -f docker-compose.dev.yml logs -f
-echo 停止服务: docker-compose -f docker-compose.dev.yml down
+echo 查看日志: docker-compose -f docker-compose.yml logs -f
+echo 停止服务: docker-compose -f docker-compose.yml down
 pause
 exit /b 0
 
@@ -70,7 +72,6 @@ echo.
 
 REM 启动后端
 echo 启动后端...
-cd gustobot
 if not exist venv (
     echo 创建虚拟环境...
     python -m venv venv
@@ -81,8 +82,6 @@ pip install -r requirements.txt
 
 REM 后台启动后端
 start /B python run.py start
-
-cd ..
 
 REM 启动前端
 echo 启动前端...
@@ -101,7 +100,6 @@ echo.
 echo 🔧 仅启动后端...
 echo.
 
-cd gustobot
 if not exist venv (
     python -m venv venv
 )

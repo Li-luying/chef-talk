@@ -9,6 +9,6 @@ export VLLM_USE_MODELSCOPE=true
   --port 8003 \
   --max-model-len 16384\
   --served-model-name GLM-4.5V \
-  --api-key vR4TUrqfZ6n6YTgKzTNnHCZMtUab6EuI3FORzTpfARyoezkQZpyHMxbe \
+  --api-key ${LLM_API_KEY:-your_api_key_here} \
   --tool-call-parser glm45   \
   --enable-auto-tool-choice

@@ -5,7 +5,7 @@
   --port 8000 \
   --max-model-len 32768 \
   --served-model-name "Qwen3-30B-A3B" \
-  --api-key vR4TUrqfZ6n6YTgKzTNnHCZMtUab6EuI3FORzTpfARyoezkQZpyHMxbe \
+  --api-key ${LLM_API_KEY:-your_api_key_here} \
   --enable-reasoning \
   --reasoning-parser deepseek_r1 \
   --enable-auto-tool-choice \

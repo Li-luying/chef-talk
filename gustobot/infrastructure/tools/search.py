@@ -49,7 +49,7 @@ class SearchTool:
         }
 
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            with httpx.Client(timeout=self.timeout, trust_env=False) as client:
                 response = client.get(self.endpoint, params=params)
                 response.raise_for_status()
         except httpx.HTTPError as exc:

@@ -12,7 +12,7 @@ docker-compose up -d
 docker-compose ps
 
 # 查看日志
-docker-compose logs -f server
+docker-compose logs -f backend
 ```
 
 服务端口：
@@ -40,8 +40,8 @@ print('Recall:', settings.RERANK_MAX_CANDIDATES, '→ Return:', settings.RERANK_
 
 **预期输出**:
 ```
-Embedding: bge-m3 @ http://10.168.2.250:9997/v1
-Reranker: bge-reranker-large @ http://10.168.2.250:9997/v1
+Embedding: <your-embedding-model> @ <your-embedding-base-url>
+Reranker: <your-rerank-model> @ <your-rerank-base-url>
 Recall: 20 → Return: 6
 ```
 
@@ -82,7 +82,7 @@ curl -X POST "http://localhost:8000/api/v1/knowledge/search" \
 ```
 [INFO] Embedding query using bge-m3
 [INFO] Milvus search: recall_k=20
-[INFO] Reranker enabled: custom @ http://10.168.2.250:9997/v1
+[INFO] Reranker enabled: custom @ http://your-rerank-host:9997/v1
 [INFO] Reranked 20 docs → Top 6
 ```
 
@@ -91,39 +91,28 @@ curl -X POST "http://localhost:8000/api/v1/knowledge/search" \
 ### 测试 3: 对话接口
 
 ```bash
-# 测试多轮对话（包含语义缓存）
+# 测试对话接口
 curl -X POST "http://localhost:8000/api/v1/chat/" \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "test_user_001",
     "session_id": "session_001",
-    "query": "红烧肉怎么做？"
-  }' | jq
-
-# 第二次相同问题（应该命中缓存）
-curl -X POST "http://localhost:8000/api/v1/chat/" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "test_user_001",
-    "session_id": "session_001",
-    "query": "红烧肉怎么做？"
+    "message": "红烧肉怎么做？",
+    "stream": false
   }' | jq
 ```
 
 **预期响应**:
 ```json
 {
-  "answer": "红烧肉的做法如下：...",
-  "route": "knowledge",
-  "confidence": 0.95,
-  "cached": false,  // 第一次
-  "sources": [
-    {"name": "红烧肉", "score": 0.98}
-  ]
+  "message": "红烧肉的做法如下：...",
+  "session_id": "session_001",
+  "message_id": "...",
+  "route": "graphrag-query",
+  "route_logic": "...",
+  "sources": []
 }
 ```
-
-第二次请求应该返回 `"cached": true` 且响应更快。
 
 ---
 
@@ -138,7 +127,7 @@ curl -X POST "http://localhost:8000/api/v1/chat/" \
 ┌─────────────────────────────────────────────┐
 │ Step 1: Embedding 向量化                     │
 │ ─────────────────────────────────────────── │
-│ API: http://10.168.2.250:9997/v1/embeddings │
+│ API: http://your-embedding-host:9997/v1/embeddings │
 │ Model: bge-m3                               │
 │ Input: "红烧肉怎么做？"                       │
 │ Output: [0.023, -0.145, ..., 0.089] (1024维)│
@@ -158,7 +147,7 @@ curl -X POST "http://localhost:8000/api/v1/chat/" \
 ┌─────────────────────────────────────────────┐
 │ Step 3: Reranker 精排                        │
 │ ─────────────────────────────────────────── │
-│ API: http://10.168.2.250:9997/v1/rerank     │
+│ API: http://your-rerank-host:9997/v1/rerank     │
 │ Model: bge-reranker-large                   │
 │ Input: Query + 20 documents                 │
 │ Process: Cross-encoder 交叉编码相关性打分    │
@@ -169,7 +158,7 @@ curl -X POST "http://localhost:8000/api/v1/chat/" \
 ┌─────────────────────────────────────────────┐
 │ Step 4: LLM 生成答案                         │
 │ ─────────────────────────────────────────── │
-│ API: http://10.168.2.110:8000/v1/chat/...   │
+│ API: http://your-llm-host:8000/v1/chat/...   │
 │ Model: Qwen3-30B-A3B                        │
 │ Context: Top 6 菜谱文档                      │
 │ Output: 自然语言答案                         │
@@ -256,7 +245,7 @@ docker-compose logs -f milvus-standalone
 **Embedding 调用**:
 ```
 [INFO] Embedding query using bge-m3
-[DEBUG] OpenAI API base: http://10.168.2.250:9997/v1
+[DEBUG] OpenAI API base: http://your-embedding-host:9997/v1
 ```
 
 **Milvus 检索**:
@@ -267,7 +256,7 @@ docker-compose logs -f milvus-standalone
 
 **Reranker 调用**:
 ```
-[INFO] Reranker enabled: custom @ http://10.168.2.250:9997/v1
+[INFO] Reranker enabled: custom @ http://your-rerank-host:9997/v1
 [DEBUG] Sending 20 documents for reranking
 [INFO] Reranked 20 docs → Top 6
 ```
@@ -276,14 +265,14 @@ docker-compose logs -f milvus-standalone
 
 ```bash
 # 测试 Embedding 服务
-curl -X POST "http://10.168.2.250:9997/v1/embeddings" \
-  -H "Authorization: Bearer sk-72tkvudyGLPMi" \
+curl -X POST "http://your-embedding-host:9997/v1/embeddings" \
+  -H "Authorization: Bearer sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{"model": "bge-m3", "input": "测试文本"}' | jq
 
 # 测试 Reranker 服务
-curl -X POST "http://10.168.2.250:9997/v1/rerank" \
-  -H "Authorization: Bearer sk-72tkvudyGLPMi" \
+curl -X POST "http://your-rerank-host:9997/v1/rerank" \
+  -H "Authorization: Bearer sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "bge-reranker-large",
@@ -293,8 +282,8 @@ curl -X POST "http://10.168.2.250:9997/v1/rerank" \
   }' | jq
 
 # 测试 LLM 服务
-curl -X POST "http://10.168.2.110:8000/v1/chat/completions" \
-  -H "Authorization: Bearer vR4TUrqfZ6n6YTgKzTNnHCZMtUab6EuI3FORzTpfARyoezkQZpyHMxbe" \
+curl -X POST "http://your-llm-host:8000/v1/chat/completions" \
+  -H "Authorization: Bearer sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "Qwen3-30B-A3B",
@@ -410,13 +399,13 @@ docker-compose exec redis redis-cli ping
 **解决方案**:
 ```bash
 # 1. 检查服务是否可达
-curl -I http://10.168.2.250:9997/v1/embeddings
+curl -I http://your-embedding-host:9997/v1/embeddings
 
 # 2. 检查 API Key 是否正确
 grep EMBEDDING_API_KEY .env
 
 # 3. 查看详细错误日志
-docker-compose logs -f server | grep -i embedding
+docker-compose logs -f backend | grep -i embedding
 ```
 
 ### 问题 2: Reranker 返回空结果
@@ -426,8 +415,8 @@ docker-compose logs -f server | grep -i embedding
 **解决方案**:
 ```bash
 # 1. 测试 Reranker 端点
-curl -X POST "http://10.168.2.250:9997/v1/rerank" \
-  -H "Authorization: Bearer sk-72tkvudyGLPMi" \
+curl -X POST "http://your-rerank-host:9997/v1/rerank" \
+  -H "Authorization: Bearer sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{"model": "bge-reranker-large", "query": "test", "documents": ["doc1"], "top_n": 1}'
 
@@ -436,7 +425,7 @@ python3 -c "from gustobot.config.settings import settings; print(settings.RERANK
 
 # 3. 临时禁用 Reranker 测试
 # 编辑 .env: RERANK_ENABLED=false
-# docker-compose restart server
+# docker-compose restart backend
 ```
 
 ### 问题 3: Milvus 连接失败
@@ -446,7 +435,7 @@ python3 -c "from gustobot.config.settings import settings; print(settings.RERANK
 **解决方案**:
 ```bash
 # 1. 检查 Milvus 容器状态
-docker-compose ps milvus-standalone
+docker-compose ps milvus
 
 # 2. 重启 Milvus
 docker-compose restart milvus-standalone etcd minio

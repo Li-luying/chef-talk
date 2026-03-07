@@ -10,8 +10,8 @@
 # 用于文本生成和问答
 LLM_PROVIDER=openai
 LLM_MODEL=Qwen3-30B-A3B
-LLM_API_KEY=vR4TUrqfZ6n6YTgKzTNnHCZMtUab6EuI3FORzTpfARyoezkQZpyHMxbe
-LLM_BASE_URL=http://10.168.2.110:8000/v1
+LLM_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+LLM_BASE_URL=http://your-llm-host:8000/v1
 ```
 
 **用途**: Multi-Agent系统中的LLM调用，包括路由分类、知识问答、对话生成等。
@@ -22,8 +22,8 @@ LLM_BASE_URL=http://10.168.2.110:8000/v1
 # 用于向量生成
 EMBEDDING_PROVIDER=openai
 EMBEDDING_MODEL=bge-m3
-EMBEDDING_API_KEY=sk-72tkvudyGLPMi
-EMBEDDING_BASE_URL=http://10.168.2.250:9997/v1
+EMBEDDING_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+EMBEDDING_BASE_URL=http://your-embedding-host:9997/v1
 EMBEDDING_DIMENSION=1024
 ```
 
@@ -38,10 +38,10 @@ EMBEDDING_DIMENSION=1024
 # 用于精排
 RERANK_ENABLED=true
 RERANK_PROVIDER=custom
-RERANK_BASE_URL=http://10.168.2.250:9997/v1
+RERANK_BASE_URL=http://your-rerank-host:9997/v1
 RERANK_ENDPOINT=/rerank
 RERANK_MODEL=bge-reranker-large
-RERANK_API_KEY=sk-72tkvudyGLPMi
+RERANK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 RERANK_MAX_CANDIDATES=20
 RERANK_TOP_N=6
 RERANK_TIMEOUT=30
@@ -59,14 +59,14 @@ RERANK_SCORE_FUSION_ALPHA=0.5
 
 ### 旧配置（仍然有效）
 ```bash
-OPENAI_API_KEY=vR4TUrqfZ6n6YTgKzTNnHCZMtUab6EuI3FORzTpfARyoezkQZpyHMxbe
-OPENAI_API_BASE=http://10.168.2.110:8000/v1
+OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+OPENAI_API_BASE=http://your-llm-host:8000/v1
 OPENAI_MODEL=Qwen3-30B-A3B
 
 RERANKER_PROVIDER=custom
-RERANKER_API_KEY=sk-72tkvudyGLPMi
+RERANKER_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 RERANKER_MODEL=bge-reranker-large
-RERANKER_API_URL=http://10.168.2.250:9997/v1
+RERANKER_API_URL=http://your-rerank-host:9997/v1
 RERANKER_TOP_K=6
 ```
 
@@ -85,9 +85,9 @@ print('Rerank Base URL:', settings.RERANK_BASE_URL)
 
 **预期输出**:
 ```
-LLM Base URL: http://10.168.2.110:8000/v1
-Embedding Base URL: http://10.168.2.250:9997/v1
-Rerank Base URL: http://10.168.2.250:9997/v1
+LLM Base URL: http://your-llm-host:8000/v1
+Embedding Base URL: http://your-embedding-host:9997/v1
+Rerank Base URL: http://your-rerank-host:9997/v1
 ```
 
 ## Settings.py 更新内容
@@ -171,8 +171,8 @@ A: 不会，保留了所有旧配置项，同时支持新旧两种配置方式�
 ## 下一步
 
 1. 确认所有API服务可访问：
-   - http://10.168.2.110:8000/v1 (LLM)
-   - http://10.168.2.250:9997/v1 (Embedding & Reranker)
+   - http://your-llm-host:8000/v1 (LLM)
+   - http://your-embedding-host:9997/v1 (Embedding & Reranker)
 
 2. 启动服务：
    ```bash

@@ -77,15 +77,19 @@ if [ "${INIT_KB_EXCEL}" != "false" ]; then
     fi
 
     if [ "${need_import}" = true ]; then
-      echo "[kb_ingest] Waiting for PostgreSQL to become available..."
-      wait_for_postgres
-      echo "[kb_ingest] Importing Excel dataset: ${KB_EXCEL_PATH}"
-      if python -m kb_service.cli process-excel "${KB_EXCEL_PATH}"; then
-        touch "${KB_EXCEL_SENTINEL}"
-        echo "[kb_ingest] Excel ingestion completed."
-      else
-        echo "[kb_ingest] Excel ingestion failed; continuing without preloaded data." >&2
-      fi
+      # Do not block API startup on a potentially long-running ingestion job.
+      # Run in background so `/health` and `/openapi.json` are available immediately.
+      (
+        echo "[kb_ingest] Waiting for PostgreSQL to become available..."
+        wait_for_postgres
+        echo "[kb_ingest] Importing Excel dataset: ${KB_EXCEL_PATH}"
+        if python -m kb_service.cli process-excel "${KB_EXCEL_PATH}"; then
+          touch "${KB_EXCEL_SENTINEL}"
+          echo "[kb_ingest] Excel ingestion completed."
+        else
+          echo "[kb_ingest] Excel ingestion failed; continuing without preloaded data." >&2
+        fi
+      ) &
     fi
   else
     echo "[kb_ingest] Excel dataset not found at ${KB_EXCEL_PATH}, skipping ingestion."

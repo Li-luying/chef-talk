@@ -43,9 +43,18 @@ def check_requirements():
 def create_env_example():
     """创建示例 .env 文件"""
     env_content = """# OpenAI API 配置（必需）
-OPENAI_API_KEY=your_openai_api_key_here
+#
+# 推荐使用 LLM_* 变量（项目内部统一配置），也兼容 OPENAI_* 变量名。
+# 任选其一即可。
+LLM_PROVIDER=openai
+LLM_API_KEY=your_api_key_here
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o-mini
+
+# 兼容旧变量名（可选）
+OPENAI_API_KEY=your_api_key_here
 OPENAI_API_BASE=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4
+OPENAI_MODEL=gpt-4o-mini
 
 # 数据库配置
 DATABASE_URL=sqlite:///./gustobot.db
@@ -134,17 +143,17 @@ def test_api():
     print("\n🧪 测试 API 连接...")
 
     import asyncio
-    import aiohttp
+    import httpx
 
     async def test():
-        async with aiohttp.ClientSession() as session:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as session:
             try:
                 # 测试健康检查
-                async with session.get('http://localhost:8000/health') as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        print("✅ 健康检查通过")
-                        print(f"   版本: {data.get('version')}")
+                resp = await session.get("http://localhost:8000/health")
+                resp.raise_for_status()
+                data = resp.json()
+                print("✅ 健康检查通过")
+                print(f"   版本: {data.get('version')}")
 
                 # 测试聊天 API
                 test_data = {
@@ -153,19 +162,14 @@ def test_api():
                     "user_id": "tester"
                 }
 
-                async with session.post(
-                    'http://localhost:8000/api/v1/chat/chat',
-                    json=test_data
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        print("✅ 聊天 API 测试通过")
-                        print(f"   路由: {data.get('route')}")
-                        print(f"   回复: {data.get('message', '')[:50]}...")
-                    else:
-                        print(f"❌ 聊天 API 测试失败: {resp.status}")
+                resp = await session.post("http://localhost:8000/api/v1/chat/", json=test_data)
+                resp.raise_for_status()
+                data = resp.json()
+                print("✅ 聊天 API 测试通过")
+                print(f"   路由: {data.get('route')}")
+                print(f"   回复: {data.get('message', '')[:50]}...")
 
-            except aiohttp.ClientError as e:
+            except httpx.HTTPError as e:
                 print(f"❌ 连接失败: {e}")
                 print("   请确保服务正在运行 (python run.py start)")
 

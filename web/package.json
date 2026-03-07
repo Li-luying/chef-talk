@@ -1,10 +1,11 @@
 {
   "name": "gustobot-chat-widget",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "lint": "vue-tsc --noEmit",
     "build": "vite build",
     "preview": "vite preview"
   },

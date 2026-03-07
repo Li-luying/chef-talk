@@ -9,4 +9,4 @@ export VLLM_USE_MODELSCOPE=true
   --port 8002 \
   --max-model-len 16384\
   --served-model-name Qwen2.5-VL-72B-Instruct \
-  --api-key vR4TUrqfZ6n6YTgKzTNnHCZMtUab6EuI3FORzTpfARyoezkQZpyHMxbe
+  --api-key ${LLM_API_KEY:-your_api_key_here}

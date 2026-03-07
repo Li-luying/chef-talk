@@ -359,12 +359,12 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # WebSocket 支持
-    location /api/v1/chat/chat/stream {
+    # SSE 支持（流式返回）
+    location /api/v1/chat/stream {
         proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -407,10 +407,10 @@ sudo crontab -e
 
 ### 常见问题
 
-1. **OpenAI API 错误**
+1. **LLM API 错误**
    ```
    错误: OPENAI_API_KEY is not configured
-   解决: 在 .env 文件中设置正确的 API 密钥
+   解决: 在 .env 文件中设置正确的 API 密钥（LLM_API_KEY 或 OPENAI_API_KEY）
    ```
 
 2. **端口占用**

@@ -272,6 +272,7 @@ data/vector_store/
 proxies.txt
 cookies.json
 *.html
+!web/index.html
 screenshots/
 downloads/
 crawled_data/

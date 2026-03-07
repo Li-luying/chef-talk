@@ -12,7 +12,12 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-if ! command -v docker-compose &> /dev/null; then
+COMPOSE_BIN=""
+if command -v docker-compose &> /dev/null; then
+    COMPOSE_BIN="docker-compose"
+elif docker compose version &> /dev/null; then
+    COMPOSE_BIN="docker compose"
+else
     echo "❌ Docker Compose 未安装，请先安装 Docker Compose"
     exit 1
 fi
@@ -39,18 +44,18 @@ case $choice in
         fi
 
         # 启动服务
-        docker-compose -f docker-compose.dev.yml up -d
+        $COMPOSE_BIN -f docker-compose.yml up -d
 
         echo ""
         echo "✅ 服务启动成功！"
         echo ""
         echo "访问地址："
-        echo "  • 前端: http://localhost:3000"
         echo "  • 后端: http://localhost:8000"
         echo "  • API文档: http://localhost:8000/docs"
+        echo "  • Neo4j: http://localhost:17474"
         echo ""
-        echo "查看日志: docker-compose -f docker-compose.dev.yml logs -f"
-        echo "停止服务: docker-compose -f docker-compose.dev.yml down"
+        echo "查看日志: $COMPOSE_BIN -f docker-compose.yml logs -f"
+        echo "停止服务: $COMPOSE_BIN -f docker-compose.yml down"
         ;;
 
     2)
@@ -60,26 +65,20 @@ case $choice in
 
         # 启动后端
         echo "启动后端..."
-        cd gustobot || exit 1
+        cd "$(dirname "$0")/.." || exit 1
+
         if [ ! -d "venv" ]; then
-            echo "创建虚拟环境..."
-            python -m venv venv
+          echo "创建虚拟环境..."
+          python -m venv venv
         fi
 
-        # 激活虚拟环境
-        if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
-            source venv/Scripts/activate
-        else
-            source venv/bin/activate
-        fi
+        source venv/bin/activate
 
         pip install -r requirements.txt
 
         # 后台启动后端
         python run.py start &
         BACKEND_PID=$!
-
-        cd ..
 
         # 启动前端
         echo "启动前端..."
@@ -97,7 +96,7 @@ case $choice in
         echo "✅ 服务启动成功！"
         echo ""
         echo "访问地址："
-        echo "  • 前端: http://localhost:3000"
+        echo "  • 前端: http://localhost:5173"
         echo "  • 后端: http://localhost:8000"
         echo ""
         echo "按 Ctrl+C 停止所有服务"
@@ -112,17 +111,12 @@ case $choice in
         echo "🔧 仅启动后端..."
         echo ""
 
-        cd gustobot || exit 1
+        cd "$(dirname "$0")/.." || exit 1
         if [ ! -d "venv" ]; then
-            python -m venv venv
+          python -m venv venv
         fi
 
-        if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
-            source venv/Scripts/activate
-        else
-            source venv/bin/activate
-        fi
-
+        source venv/bin/activate
         pip install -r requirements.txt
         python run.py start
         ;;
@@ -132,7 +126,7 @@ case $choice in
         echo "🎨 仅启动前端..."
         echo ""
 
-        cd web || exit 1
+        cd "$(dirname "$0")/../web" || exit 1
         if [ ! -d "node_modules" ]; then
             npm install
         fi

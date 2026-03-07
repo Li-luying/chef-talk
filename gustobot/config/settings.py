@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Tuple
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     # Application metadata
     APP_NAME: str = "GustoBot"
-    APP_VERSION: str = "0.1.0"
+    APP_VERSION: str = "0.1.1"
     DEBUG: bool = True
 
     # API configuration
@@ -24,9 +24,20 @@ class Settings(BaseSettings):
 
     # LLM configuration
     LLM_PROVIDER: str = Field(default="openai", description="LLM provider: openai, anthropic, etc.")
-    LLM_MODEL: str = Field(default="gpt-4-turbo-preview", description="LLM model name")
-    LLM_API_KEY: Optional[str] = None
-    LLM_BASE_URL: Optional[str] = Field(default=None, description="LLM API base URL")
+    LLM_MODEL: str = Field(
+        default="gpt-4-turbo-preview",
+        description="LLM model name",
+        validation_alias=AliasChoices("LLM_MODEL", "OPENAI_MODEL"),
+    )
+    LLM_API_KEY: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_API_KEY", "OPENAI_API_KEY"),
+    )
+    LLM_BASE_URL: Optional[str] = Field(
+        default=None,
+        description="LLM API base URL",
+        validation_alias=AliasChoices("LLM_BASE_URL", "OPENAI_API_BASE"),
+    )
 
     # OpenAI compatibility (使用 LLM 配置)
     @property

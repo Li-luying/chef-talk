@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
 """测试 Heuristic Router 关键词兜底机制"""
+from __future__ import annotations
+
+import os
+
+if __name__ != "__main__" and not os.getenv("GUSTOBOT_RUN_INTEGRATION_TESTS"):
+    import pytest
+
+    pytest.skip(
+        "Integration-style heuristic router script (set GUSTOBOT_RUN_INTEGRATION_TESTS=1 to enable in pytest).",
+        allow_module_level=True,
+    )
 import asyncio
 import sys
 from pathlib import Path

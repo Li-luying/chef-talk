@@ -5,6 +5,18 @@ Agent 路由测试脚本
 执行方式：python -m tests.test_agent_routing
 """
 
+from __future__ import annotations
+
+import os
+
+if __name__ != "__main__" and not os.getenv("GUSTOBOT_RUN_INTEGRATION_TESTS"):
+    import pytest
+
+    pytest.skip(
+        "Integration-style routing script (set GUSTOBOT_RUN_INTEGRATION_TESTS=1 to enable in pytest).",
+        allow_module_level=True,
+    )
+
 import asyncio
 import sys
 from pathlib import Path

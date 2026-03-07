@@ -120,16 +120,21 @@ async def query_lightrag_stream(request: LightRAGQueryRequest):
         # 将异步生成器包装为 StreamingResponse
         async def event_generator() -> AsyncIterator[str]:
             try:
-                async for chunk in response_gen:
-                    # SSE 格式: data: <content>\n\n
-                    yield f"data: {chunk}\n\n"
-
-                # 发送结束标记
-                yield "data: [DONE]\n\n"
-
+                # `response_gen` is expected to be an async generator, but some providers may
+                # return a plain string even when stream=True. Be defensive to keep SSE stable.
+                if isinstance(response_gen, str):
+                    if response_gen:
+                        yield f"data: {response_gen}\n\n"
+                else:
+                    async for chunk in response_gen:
+                        # SSE 格式: data: <content>\n\n
+                        yield f"data: {chunk}\n\n"
             except Exception as e:
                 logger.error(f"流式响应中发生错误: {str(e)}", exc_info=True)
                 yield f"data: [ERROR] {str(e)}\n\n"
+            finally:
+                # 发送结束标记（无论是否出错都发，方便客户端收尾）
+                yield "data: [DONE]\n\n"
 
         logger.info(f"开始流式查询 | 模式: {request.mode}")
         return StreamingResponse(

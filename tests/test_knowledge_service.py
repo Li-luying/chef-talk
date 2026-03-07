@@ -21,8 +21,7 @@ def sample_recipe():
 
 def test_format_recipe_document(sample_recipe):
     """测试菜谱格式化"""
-    service = KnowledgeService()
-    document = service._format_recipe_document(sample_recipe)
+    document = KnowledgeService._format_recipe_document(sample_recipe)
 
     assert "测试菜谱" in document
     assert "家常菜" in document

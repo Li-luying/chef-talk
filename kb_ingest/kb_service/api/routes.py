@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, UploadFile, File, Form
+from openai import APIConnectionError, AuthenticationError, OpenAIError, RateLimitError
 
 from kb_service.api.deps import get_config
 from kb_service.core.config import Config, clone_config
@@ -152,15 +153,33 @@ def ingest_mysql(
 )
 def vector_search(payload: SearchRequest, config: Config = Depends(get_config)):
     searcher = VectorSearcher(config)
-    results = searcher.search_similar(
-        query=payload.query,
-        top_k=payload.top_k,
-        threshold=payload.threshold,
-        metric=payload.metric,
-        company_filter=payload.company_filter,
-        source_tables=payload.source_tables,
-    )
-    return {"query": payload.query, "results": results, "count": len(results)}
+    try:
+        results = searcher.search_similar(
+            query=payload.query,
+            top_k=payload.top_k,
+            threshold=payload.threshold,
+            metric=payload.metric,
+            company_filter=payload.company_filter,
+            source_tables=payload.source_tables,
+        )
+        return {"query": payload.query, "results": results, "count": len(results)}
+    except AuthenticationError:
+        # Treat as service configuration issue (upstream embedding provider auth).
+        # Do not leak any credential details into API responses.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Embedding provider authentication failed. Check KB_EMBEDDING_API_KEY/KB_EMBEDDING_BASE_URL.",
+        )
+    except (RateLimitError, APIConnectionError):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Embedding provider unavailable (rate limited or connection error).",
+        )
+    except OpenAIError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Embedding provider returned an error.",
+        )
 
 
 @router.post(
@@ -170,11 +189,27 @@ def vector_search(payload: SearchRequest, config: Config = Depends(get_config)):
 )
 def hybrid_search(payload: HybridSearchRequest, config: Config = Depends(get_config)):
     searcher = VectorSearcher(config)
-    return searcher.hybrid_search(
-        query=payload.query,
-        vector_top_k=payload.vector_top_k,
-        rerank_top_k=payload.rerank_top_k,
-        threshold=payload.threshold,
-        metric=payload.metric,
-        source_tables=payload.source_tables,
-    )
+    try:
+        return searcher.hybrid_search(
+            query=payload.query,
+            vector_top_k=payload.vector_top_k,
+            rerank_top_k=payload.rerank_top_k,
+            threshold=payload.threshold,
+            metric=payload.metric,
+            source_tables=payload.source_tables,
+        )
+    except AuthenticationError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Embedding provider authentication failed. Check KB_EMBEDDING_API_KEY/KB_EMBEDDING_BASE_URL.",
+        )
+    except (RateLimitError, APIConnectionError):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Embedding provider unavailable (rate limited or connection error).",
+        )
+    except OpenAIError:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Embedding provider returned an error.",
+        )

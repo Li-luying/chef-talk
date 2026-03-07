@@ -4,24 +4,25 @@
 
 ### 方式一：Docker Compose（推荐）
 
-一键启动所有服务：
+一键启动后端 + 依赖服务（Neo4j / MySQL / Redis / Milvus / pgvector 等）：
 
 ```bash
-# 启动所有服务（后端 + 前端 + 数据库）
-docker-compose -f docker-compose.dev.yml up -d
+# 启动所有服务（后端 + 数据库/向量库等）
+docker-compose up -d
 
 # 查看日志
-docker-compose -f docker-compose.dev.yml logs -f
+docker-compose logs -f
 
 # 停止服务
-docker-compose -f docker-compose.dev.yml down
+docker-compose down
 ```
 
 访问地址：
-- 前端：http://localhost:3000
-- 后端 API：http://localhost:8000
-- API 文档：http://localhost:8000/docs
-- Neo4j Browser：http://localhost:7474
+- 后端 API： http://localhost:8000
+- API 文档： http://localhost:8000/docs
+- Neo4j Browser： http://localhost:17474
+
+> 前端是 `web/` 下的 Vite 应用，需要单独启动（见下文“前端启动”）。
 
 ### 方式二：本地开发
 
@@ -57,6 +58,8 @@ npm install
 npm run dev
 ```
 
+默认访问：http://localhost:5173（可通过环境变量 `VITE_PORT` 修改端口）
+
 ## 📁 项目结构
 
 ```
@@ -67,13 +70,11 @@ GustoBot/
 │   └── main.py            # 应用入口
 ├── web/                    # 前端代码
 │   ├── src/
-│   │   ├── components/    # React 组件
-│   │   ├── services/      # API 服务
-│   │   └── App.jsx        # 应用入口
-│   ├── public/            # 静态资源
+│   │   ├── components/    # Vue 组件
+│   │   └── App.vue        # 应用入口
 │   ├── package.json       # 前端依赖
-│   └── vite.config.js     # Vite 配置
-├── docker-compose.dev.yml # Docker Compose 配置
+│   └── vite.config.ts     # Vite 配置
+├── docker-compose.yml     # Docker Compose 配置
 ├── .env                    # 环境变量
 └── requirements.txt        # Python 依赖
 ```
@@ -104,7 +105,7 @@ MILVUS_PORT=19530
 
 # 应用配置
 DEBUG=true
-CORS_ORIGINS=http://localhost:3000
+CORS_ORIGINS=http://localhost:5173
 ```
 
 ### 前端环境变量
@@ -112,7 +113,8 @@ CORS_ORIGINS=http://localhost:3000
 在 `web` 目录下创建 `.env.local`：
 
 ```env
-VITE_API_URL=http://localhost:8000
+# 可选：指定后端地址（不填则使用 Vite proxy 转发 /api 与 /uploads）
+VITE_API_BASE_URL=http://localhost:8000
 ```
 
 ## 🛠️ 开发工作流
@@ -127,7 +129,7 @@ VITE_API_URL=http://localhost:8000
 
 1. 在 `web/src/` 目录下修改组件
 2. 保存后会自动刷新浏览器
-3. 使用 React DevTools 调试
+3. 使用 Vue Devtools 调试
 
 ### 3. 调试技巧
 
@@ -153,11 +155,10 @@ python -m debugpy --listen 5678 run.py start
 
 ```bash
 # 测试 API
-python test_chat_api.py
+python tests/test_router_smoke.py
 
 # 代码格式化
 black gustobot/
-isort gustobot/
 
 # 类型检查
 mypy gustobot/

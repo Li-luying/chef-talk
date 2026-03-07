@@ -94,6 +94,21 @@ class CRUDChatMessage(CRUDBase[ChatMessage, ChatMessageCreate, ChatMessageUpdate
             db.refresh(db_message)
         return db_messages
 
+    def delete_by_session(self, db: Session, *, session_id: str) -> int:
+        """
+        Delete all messages for a specific session.
+
+        Returns:
+            Number of rows deleted.
+        """
+        deleted = (
+            db.query(self.model)
+            .filter(self.model.session_id == session_id)
+            .delete(synchronize_session=False)
+        )
+        db.commit()
+        return int(deleted or 0)
+
 
 class CRUDChatSessionSnapshot(
     CRUDBase[ChatSessionSnapshot, ChatSessionSnapshotCreate, None]

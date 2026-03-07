@@ -5,8 +5,8 @@ import asyncio
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from langchain.schema import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from loguru import logger
 
 from gustobot.config import settings
@@ -229,7 +229,8 @@ class KnowledgeService:
 
         return {"add_count": len(ids) if success else 0, "ids": ids, "stored": success}
 
-    def _format_recipe_document(self, recipe: Dict[str, Any]) -> str:
+    @staticmethod
+    def _format_recipe_document(recipe: Dict[str, Any]) -> str:
         parts: List[str] = []
         name = recipe.get("name")
         if name:

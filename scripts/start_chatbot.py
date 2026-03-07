@@ -1,28 +1,31 @@
 """
 启动 GustoBot 聊天系统
 
-同时启动后端 API 服务器和提供前端页面访问
+同时启动后端 API 服务器和前端 Vite 开发服务器
 """
 import os
 import sys
 import subprocess
-import threading
 import time
 import webbrowser
 from pathlib import Path
 
-# 设置路径
-project_root = Path(__file__).parent
-sys.path.insert(0, str(project_root))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+WEB_ROOT = PROJECT_ROOT / "web"
+sys.path.insert(0, str(PROJECT_ROOT))
 
-def start_backend():
+
+def _ensure_env_hint() -> None:
+    if os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY"):
+        return
+    print("⚠️  警告: 未设置 LLM_API_KEY (或 OPENAI_API_KEY) 环境变量")
+    print("   请先复制并编辑 .env：cp .env.example .env")
+
+
+def start_backend() -> subprocess.Popen:
     """启动后端 FastAPI 服务器"""
     print("🚀 启动后端服务器...")
-
-    # 检查环境变量
-    if not os.getenv('OPENAI_API_KEY'):
-        print("⚠️  警告: 未设置 OPENAI_API_KEY 环境变量")
-        print("请确保在 .env 文件中配置了 OPENAI_API_KEY")
+    _ensure_env_hint()
 
     # 启动 uvicorn
     cmd = [
@@ -32,35 +35,32 @@ def start_backend():
         "--host", "0.0.0.0",
         "--port", "8000"
     ]
+    return subprocess.Popen(cmd, cwd=PROJECT_ROOT)
 
-    subprocess.run(cmd, cwd=project_root)
 
-def start_frontend():
-    """启动前端静态文件服务器"""
-    print("🌐 启动前端服务器...")
+def start_frontend() -> subprocess.Popen:
+    """启动前端 Vite 开发服务器"""
+    print("🌐 启动前端 Vite 服务器...")
 
-    # 使用 Python 内置的 HTTP 服务器
-    import http.server
-    import socketserver
+    if not WEB_ROOT.exists():
+        raise RuntimeError(f"web 目录不存在: {WEB_ROOT}")
 
-    os.chdir(project_root / "web")
+    vite_port = os.getenv("VITE_PORT", "5173")
 
-    class Handler(http.server.SimpleHTTPRequestHandler):
-        def end_headers(self):
-            # 添加 CORS 头
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.send_header('Access-Control-Allow-Methods', '*')
-            self.send_header('Access-Control-Allow-Headers', '*')
-            super().end_headers()
+    # Install deps if needed
+    if not (WEB_ROOT / "node_modules").exists():
+        print("📦 安装前端依赖 (npm install)...")
+        subprocess.run(["npm", "install"], cwd=WEB_ROOT, check=True)
 
-    with socketserver.TCPServer(("", 8001), Handler) as httpd:
-        print(f"前端服务器运行在: http://localhost:8001")
-        httpd.serve_forever()
+    cmd = ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", str(vite_port)]
+    return subprocess.Popen(cmd, cwd=WEB_ROOT)
 
-def open_browser():
+
+def open_browser() -> None:
     """打开浏览器"""
     time.sleep(3)  # 等待服务器启动
-    webbrowser.open("http://localhost:8001/chatbot/")
+    vite_port = os.getenv("VITE_PORT", "5173")
+    webbrowser.open(f"http://localhost:{vite_port}/")
 
 def main():
     """主函数"""
@@ -69,24 +69,17 @@ def main():
     print("="*60)
     print("\n正在启动服务...\n")
 
-    # 在新线程中启动后端
-    backend_thread = threading.Thread(target=start_backend, daemon=True)
-    backend_thread.start()
+    backend_proc = start_backend()
+    time.sleep(1)
+    frontend_proc = start_frontend()
 
-    # 等待后端启动
-    time.sleep(2)
-
-    # 在新线程中启动前端
-    frontend_thread = threading.Thread(target=start_frontend, daemon=True)
-    frontend_thread.start()
-
-    # 打开浏览器
     open_browser()
 
     print("\n" + "="*60)
     print("✅ 服务已启动!")
     print("\n访问地址:")
-    print("  • 前端界面: http://localhost:8001/chatbot/")
+    vite_port = os.getenv("VITE_PORT", "5173")
+    print(f"  • 前端界面: http://localhost:{vite_port}/")
     print("  • API 文档: http://localhost:8000/docs")
     print("\n使用说明:")
     print("  1. 在浏览器中打开前端界面")
@@ -96,11 +89,24 @@ def main():
     print("="*60)
 
     try:
-        # 保持主线程运行
         while True:
+            if backend_proc.poll() is not None:
+                raise RuntimeError("后端进程已退出")
+            if frontend_proc.poll() is not None:
+                raise RuntimeError("前端进程已退出")
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n\n👋 正在停止服务...")
+        for proc in (frontend_proc, backend_proc):
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        for proc in (frontend_proc, backend_proc):
+            try:
+                proc.wait(timeout=10)
+            except Exception:
+                pass
         sys.exit(0)
 
 if __name__ == "__main__":

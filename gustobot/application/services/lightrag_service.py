@@ -8,6 +8,7 @@ LightRAG 问答检索服务
 - 支持增量文档插入
 """
 
+import json
 import os
 import asyncio
 import inspect
@@ -28,6 +29,29 @@ logger = get_logger(service="lightrag-service")
 
 # 检索模式类型
 SearchMode = Literal["naive", "local", "global", "hybrid", "mix", "bypass"]
+
+def _infer_embedding_dim_from_working_dir(working_dir: str) -> Optional[int]:
+    """
+    Best-effort infer embedding dimension from pre-generated LightRAG VDB files.
+
+    Our build pipeline stores embedding dimension inside `vdb_*.json` (top-level
+    `embedding_dim`), which is the most reliable source when the runtime env var
+    `EMBEDDING_DIMENSION` is unset/empty.
+    """
+    for file_name in ("vdb_chunks.json", "vdb_entities.json", "vdb_relationships.json"):
+        path = Path(working_dir) / file_name
+        if not path.exists():
+            continue
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+            dim = payload.get("embedding_dim") if isinstance(payload, dict) else None
+            if isinstance(dim, int) and dim > 0:
+                return dim
+        except Exception:
+            # Never fail init because of inference errors.
+            continue
+    return None
 
 
 class LightRAGQueryRequest(BaseModel):
@@ -147,11 +171,19 @@ class LightRAGService:
         np.ndarray
             嵌入向量数组
         """
-        return await openai_embed(
+        api_key = settings.EMBEDDING_API_KEY or settings.OPENAI_API_KEY
+        base_url = settings.EMBEDDING_BASE_URL or settings.OPENAI_API_BASE
+        # NOTE: In LightRAG v1.4.x, `openai_embed` itself is already wrapped by an
+        # EmbeddingFunc (default dim=1536). Calling it directly can cause false
+        # "dimension mismatch" errors when using non-1536 embedding models.
+        # Use the unwrapped function via `.func` and let *our* EmbeddingFunc
+        # (configured with the correct embedding_dim) validate the output.
+        embed_func = getattr(openai_embed, "func", openai_embed)
+        return await embed_func(
             texts=texts,
             model=settings.EMBEDDING_MODEL,
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_API_BASE,
+            api_key=api_key,
+            base_url=base_url,
         )
 
     async def initialize(self) -> None:
@@ -205,8 +237,24 @@ class LightRAGService:
                     logger.info(f"  - {file_name}: {file_size / 1024:.2f} KB")
 
             # 获取 embedding 维度
-            embedding_dim = int(settings.EMBEDDING_DIMENSION or 1536)
-            logger.info(f"Embedding 维度: {embedding_dim}")
+            embedding_dim: Optional[int] = None
+            explicit_dim_env = os.getenv("EMBEDDING_DIMENSION")
+            if explicit_dim_env and explicit_dim_env.strip():
+                try:
+                    embedding_dim = int(explicit_dim_env)
+                    logger.info(f"Embedding 维度(环境变量): {embedding_dim}")
+                except ValueError:
+                    logger.warning(f"无效的 EMBEDDING_DIMENSION 值: {explicit_dim_env!r}，将尝试从索引推断")
+
+            if embedding_dim is None:
+                inferred = _infer_embedding_dim_from_working_dir(self.working_dir)
+                if inferred:
+                    embedding_dim = inferred
+                    logger.info(f"Embedding 维度(从索引推断): {embedding_dim}")
+                else:
+                    embedding_dim = int(getattr(settings, "EMBEDDING_DIMENSION", 1536) or 1536)
+                    logger.info(f"Embedding 维度(默认): {embedding_dim}")
+
             logger.info(f"LLM 模型: {settings.OPENAI_MODEL}")
             logger.info(f"Embedding 模型: {settings.EMBEDDING_MODEL}")
 
@@ -280,12 +328,28 @@ class LightRAGService:
             response = await self.rag.aquery(query, param=param)
 
             # 如果是流式响应，返回生成器
-            if stream and inspect.isasyncgen(response):
-                logger.info("返回流式响应")
-                return response
-            else:
-                logger.info(f"查询成功 | 响应长度: {len(response)} 字符")
-                return response
+            if stream:
+                # Some LightRAG versions/providers may return a plain string even when stream=True.
+                # To keep the HTTP SSE contract stable, wrap non-generator responses.
+                if inspect.isasyncgen(response):
+                    logger.info("返回流式响应")
+                    return response
+
+                async def one_shot() -> AsyncGenerator[str, None]:
+                    if response:
+                        yield str(response)
+
+                logger.info("stream=true but got non-generator response; wrapped as one-shot stream")
+                return one_shot()
+
+            # Non-streaming path -------------------------------------------------
+            if response is None:
+                logger.warning("Non-stream query returned None; treating as empty response")
+                return ""
+
+            response_text = str(response)
+            logger.info(f"查询成功 | 响应长度: {len(response_text)} 字符")
+            return response_text
 
         except Exception as e:
             logger.error(f"查询失败: {str(e)}", exc_info=True)

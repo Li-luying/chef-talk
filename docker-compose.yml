@@ -8,12 +8,11 @@ services:
       dockerfile: Dockerfile
       target: server
       args:
-        # LightRAG 构建时初始化（从 .env 自动读取，使用 LLM_* 变量名）
+        # LightRAG 构建时初始化（可选）
+        # 注意：不要通过 build args 传递密钥，避免在构建日志中泄露。
         - INIT_LIGHTRAG_ON_BUILD=${INIT_LIGHTRAG_ON_BUILD:-true}
-        - LLM_API_KEY=${LLM_API_KEY}
         - LLM_BASE_URL=${LLM_BASE_URL}
         - LLM_MODEL=${LLM_MODEL}
-        - EMBEDDING_API_KEY=${EMBEDDING_API_KEY}
         - EMBEDDING_MODEL=${EMBEDDING_MODEL}
         - EMBEDDING_BASE_URL=${EMBEDDING_BASE_URL}
         - EMBEDDING_DIMENSION=${EMBEDDING_DIMENSION}

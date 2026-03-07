@@ -137,15 +137,20 @@ class VectorStore:
             if not metadatas:
                 metadatas = [{}] * len(ids)
 
+            def _as_varchar(value: Any) -> str:
+                if value is None:
+                    return ""
+                return str(value)
+
             # 准备插入数据
             entities = [
                 ids,
                 embeddings,
                 documents,
-                [meta.get("recipe_id", "") for meta in metadatas],
-                [meta.get("name", "") for meta in metadatas],
-                [meta.get("category", "") for meta in metadatas],
-                [meta.get("difficulty", "") for meta in metadatas],
+                [_as_varchar(meta.get("recipe_id")) for meta in metadatas],
+                [_as_varchar(meta.get("name")) for meta in metadatas],
+                [_as_varchar(meta.get("category")) for meta in metadatas],
+                [_as_varchar(meta.get("difficulty")) for meta in metadatas],
             ]
 
             # 插入数据

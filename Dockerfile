@@ -19,8 +19,8 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN python -m pip install --upgrade pip -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple && \
-    pip install -r requirements.txt -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+RUN python -m pip install --upgrade pip -i https://mirrors.ustc.edu.cn/pypi/simple && \
+    pip install -r requirements.txt -i https://mirrors.ustc.edu.cn/pypi/simple
 
 COPY gustobot ./gustobot
 COPY data ./data

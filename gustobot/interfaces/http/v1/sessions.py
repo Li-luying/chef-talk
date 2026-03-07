@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session
 
 from gustobot.infrastructure.core.database import get_db
 from gustobot.infrastructure.persistence.crud import chat_message, chat_session, chat_session_snapshot
-from gustobot.interfaces.http.models.chat_message import ChatMessageCreate, ChatSessionSnapshotCreate
+from gustobot.interfaces.http.models.chat_message import (
+    ChatMessageCreate,
+    ChatMessageResponse,
+    ChatSessionSnapshotCreate,
+    ChatSessionSnapshotResponse,
+)
 from gustobot.interfaces.http.models.chat_session import (
     ChatSessionCreate,
     ChatSessionResponse,
@@ -140,7 +145,11 @@ def delete_session(
     chat_session.soft_delete(db, session_id=session_id)
 
 
-@router.post("/{session_id}/messages", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{session_id}/messages",
+    response_model=ChatMessageResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 def add_message_to_session(
     *,
     db: Session = Depends(get_db),
@@ -170,7 +179,11 @@ def add_message_to_session(
     return message
 
 
-@router.post("/{session_id}/snapshot", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{session_id}/snapshot",
+    response_model=ChatSessionSnapshotResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 def create_session_snapshot(
     *,
     db: Session = Depends(get_db),

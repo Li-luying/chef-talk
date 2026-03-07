@@ -13,6 +13,7 @@ from typing import List, Optional, Sequence
 
 from loguru import logger
 from openai import OpenAI
+import httpx
 
 
 class OpenAICompatibleEmbeddings:
@@ -39,7 +40,17 @@ class OpenAICompatibleEmbeddings:
         if base_url:
             client_kwargs["base_url"] = base_url
 
-        self._client = OpenAI(**client_kwargs)
+        try:
+            self._client = OpenAI(**client_kwargs)
+        except ValueError as exc:
+            # Some environments set ALL_PROXY to an unsupported scheme like `socks://...`,
+            # which makes httpx (and therefore the OpenAI client) crash at import-time.
+            # Fall back to a client that ignores env proxies to keep the KB functional.
+            if "Unknown scheme for proxy URL" in str(exc):
+                logger.warning("Invalid proxy env detected; disabling trust_env for OpenAI client: %s", exc)
+                self._client = OpenAI(**client_kwargs, http_client=httpx.Client(trust_env=False))
+            else:
+                raise
         logger.info(
             "Initialised OpenAI-compatible embeddings client (model=%s, base_url=%s)",
             model,
