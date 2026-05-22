@@ -12,12 +12,12 @@ class Router(BaseModel):
     type: Literal[
         "general-query",
         "additional-query",
-        "kb-query",
-        "graphrag-query",
+        "culture-query",
+        "recipe-query",
         "image-query",
         "file-query",
-        "text2sql-query",
-    ] = "kb-query"
+        "stats-query",
+    ] = "culture-query"
     question: str = ""
     decision: Optional[str] = None
     confidence: Optional[float] = None

@@ -1,3 +1,4 @@
+from typing import Optional
 from langchain_neo4j import Neo4jGraph
 from gustobot.config import settings
 from gustobot.infrastructure.core.logger import get_logger
@@ -14,13 +15,22 @@ logging.getLogger("langchain_neo4j").setLevel(logging.ERROR)
 logging.getLogger("neo4j.io").setLevel(logging.ERROR)
 logging.getLogger("neo4j.bolt").setLevel(logging.ERROR)
 
+# Neo4j 连接单例缓存
+_neo4j_graph: Optional[Neo4jGraph] = None
+
+
 def get_neo4j_graph() -> Neo4jGraph:
     """
-    创建并返回一个Neo4jGraph实例，使用配置文件中的设置。
-    
+    获取 Neo4jGraph 单例实例，使用配置文件中的设置。
+    首次调用时创建连接，后续复用。
+
     Returns:
         Neo4jGraph: 配置好的Neo4j图数据库连接实例
     """
+    global _neo4j_graph
+    if _neo4j_graph is not None:
+        return _neo4j_graph
+
     logger.info(f"initialize Neo4j connection: {settings.NEO4J_URI}")
 
     try:
@@ -33,8 +43,8 @@ def get_neo4j_graph() -> Neo4jGraph:
                 "username": settings.NEO4J_USER,
                 "password": settings.NEO4J_PASSWORD,
             })
-        
-        neo4j_graph = Neo4jGraph(**kwargs)
-        return neo4j_graph
+
+        _neo4j_graph = Neo4jGraph(**kwargs)
+        return _neo4j_graph
     except Exception as e:
         raise

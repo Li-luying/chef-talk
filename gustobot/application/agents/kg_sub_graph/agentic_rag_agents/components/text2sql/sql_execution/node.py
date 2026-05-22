@@ -17,6 +17,22 @@ from gustobot.infrastructure.core.logger import get_logger
 
 logger = get_logger(service="text2sql.sql_execution")
 
+# SQL 引擎缓存，避免每次查询创建/销毁引擎
+_cached_engine: Optional[Engine] = None
+_cached_engine_conn_str: Optional[str] = None
+
+
+def _get_engine(connection_string: str) -> Engine:
+    """获取缓存的 SQLAlchemy 引擎，相同连接字符串复用实例。"""
+    global _cached_engine, _cached_engine_conn_str
+    if _cached_engine is None or _cached_engine_conn_str != connection_string:
+        if _cached_engine is not None:
+            _cached_engine.dispose()
+        _cached_engine = create_engine(connection_string, future=True, pool_pre_ping=True)
+        _cached_engine_conn_str = connection_string
+        logger.info("Created SQL engine for %s", connection_string.split("@")[-1] if "@" in connection_string else connection_string)
+    return _cached_engine
+
 
 def create_sql_execution_node(
     connection_string: Optional[str] = None,
@@ -118,18 +134,15 @@ def _run_query_sync(
     sql: str,
     max_rows: int,
 ) -> List[Dict[str, Any]]:
-    engine: Engine = create_engine(connection_string, future=True)
-    try:
-        with engine.connect() as connection:
-            result = connection.execution_options(stream_results=True).execute(text(sql))
-            columns = list(result.keys())
-            rows = result.fetchmany(max_rows)
-            return [
-                {column: row[idx] for idx, column in enumerate(columns)}
-                for row in rows
-            ]
-    finally:
-        engine.dispose()
+    engine = _get_engine(connection_string)
+    with engine.connect() as connection:
+        result = connection.execution_options(stream_results=True).execute(text(sql))
+        columns = list(result.keys())
+        rows = result.fetchmany(max_rows)
+        return [
+            {column: row[idx] for idx, column in enumerate(columns)}
+            for row in rows
+        ]
 
 
 def _is_read_only_query(sql: str) -> bool:

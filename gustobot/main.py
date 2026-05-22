@@ -96,6 +96,19 @@ async def startup_event() -> None:
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables ready")
 
+    # Pre-warm LightRAG singleton so first request doesn't pay init cost
+    try:
+        from gustobot.application.agents.kg_sub_graph.agentic_rag_agents.components.customer_tools.node import (
+            get_lightrag_api,
+        )
+        logger.info("Pre-warming LightRAG...")
+        api = get_lightrag_api()
+        if not api.initialized:
+            await api.initialize()
+        logger.info("LightRAG pre-warmed successfully")
+    except Exception as exc:
+        logger.warning("LightRAG pre-warm skipped: {}", exc)
+
 
 @application.on_event("shutdown")
 async def shutdown_event() -> None:

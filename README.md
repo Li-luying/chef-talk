@@ -164,6 +164,9 @@ cp .env.example .env # 编辑 .env 文件，配置必要的 API 密钥
 # 启动后端服务（Docker）
 docker-compose up -d
 
+# 停止所有服务（容器还在，数据不丢）
+docker compose stop
+
 # 安装并启动前端（本地）
 cd web
 npm install

@@ -2,14 +2,12 @@ from typing import Any, Callable, Coroutine, Dict, List
 import re
 
 from langchain_neo4j import Neo4jGraph
-from langchain_openai import ChatOpenAI
 
 from gustobot.application.agents.kg_sub_graph.agentic_rag_agents.constants import NO_CYPHER_RESULTS
 from gustobot.application.agents.kg_sub_graph.agentic_rag_agents.components.state import PredefinedCypherInputState
 from gustobot.application.agents.kg_sub_graph.agentic_rag_agents.components.text2cypher.state import CypherOutputState
 from gustobot.application.agents.kg_sub_graph.agentic_rag_agents.components.predefined_cypher.utils import create_vector_query_matcher
 from gustobot.application.agents.kg_sub_graph.agentic_rag_agents.components.predefined_cypher.descriptions import QUERY_DESCRIPTIONS
-from gustobot.config import settings
 
 
 def create_predefined_cypher_node(
@@ -35,16 +33,6 @@ def create_predefined_cypher_node(
     """
     matcher = create_vector_query_matcher(predefined_cypher_dict, QUERY_DESCRIPTIONS)
 
-    openai_kwargs: Dict[str, Any] = {
-        "model": settings.OPENAI_MODEL,
-        "temperature": 0,
-    }
-    if settings.OPENAI_API_KEY:
-        openai_kwargs["openai_api_key"] = settings.OPENAI_API_KEY
-    if settings.OPENAI_API_BASE:
-        openai_kwargs["openai_api_base"] = settings.OPENAI_API_BASE
-    chat_llm = ChatOpenAI(**openai_kwargs)
-
     async def predefined_cypher(
         state: PredefinedCypherInputState,
     ) -> Dict[str, List[CypherOutputState] | List[str]]:
@@ -68,7 +56,7 @@ def create_predefined_cypher_node(
         parameters: Dict[str, Any] = incoming_params.get("parameters") or {}
 
         if statement and not parameters:
-            parameters = matcher.extract_parameters(question, query_name, llm=chat_llm)
+            parameters = matcher.extract_parameters(question, query_name)
 
         # 确保参数类型为字符串键
         parameters = {str(k): v for k, v in parameters.items()}
@@ -95,7 +83,7 @@ def create_predefined_cypher_node(
                             "parameters": parameters,
                         },
                         "errors": errors,
-                        "records": records if records else NO_CYPHER_RESULTS,
+                        "records": {"result": records} if records else {"result": []},
                         "steps": ["execute_predefined_cypher"],
                     }
                 )

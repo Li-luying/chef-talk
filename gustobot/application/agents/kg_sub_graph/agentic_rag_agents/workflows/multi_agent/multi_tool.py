@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Dict, List, Optional, Literal
 
 from operator import add
@@ -551,14 +552,109 @@ def create_kb_multi_tool_workflow(
             "steps": ["router"],
         }
 
+    async def _query_postgres(question: str) -> List[Dict[str, Any]]:
+        """Query PostgreSQL pgvector and return formatted results."""
+        results: List[Dict[str, Any]] = []
+        if not postgres_search_url:
+            return results
+        payload: Dict[str, Any] = {
+            "query": question,
+            "top_k": effective_top_k,
+        }
+        if settings.KB_POSTGRES_SIMILARITY_THRESHOLD is not None:
+            payload["threshold"] = settings.KB_POSTGRES_SIMILARITY_THRESHOLD
+        try:
+            timeout_cfg = aiohttp.ClientTimeout(total=request_timeout)
+            async with aiohttp.ClientSession(timeout=timeout_cfg) as session:
+                async with session.post(postgres_search_url, json=payload) as response:
+                    if response.status == 200:
+                        body = await response.json()
+                        data_results = body.get("results") or []
+                        if isinstance(data_results, list):
+                            for idx, item in enumerate(data_results):
+                                item_copy = dict(item)
+                                metadata_copy = dict(item_copy.get("metadata") or {})
+                                item_copy["metadata"] = metadata_copy
+                                item_copy["tool"] = "postgres"
+                                similarity = (
+                                    item_copy.get("similarity")
+                                    if item_copy.get("similarity") is not None
+                                    else item_copy.get("score")
+                                )
+                                if similarity is not None:
+                                    try:
+                                        item_copy["similarity"] = float(similarity)
+                                    except (TypeError, ValueError):
+                                        item_copy["similarity"] = 0.0
+                                item_copy["id"] = str(
+                                    item_copy.get("id")
+                                    or item_copy.get("document_id")
+                                    or item_copy.get("source_id")
+                                    or f"postgres_{idx}"
+                                )
+                                results.append(item_copy)
+                            if results and knowledge_service.reranker.enabled:
+                                results = await knowledge_service.reranker.rerank(
+                                    question, results, effective_top_k
+                                )
+                            filtered: List[Dict[str, Any]] = []
+                            for doc in results:
+                                similarity = float(doc.get("similarity") or doc.get("score") or 0.0)
+                                rerank_score = float(doc.get("rerank_score") or 0.0)
+                                if knowledge_service.reranker.enabled:
+                                    if (
+                                        similarity >= settings.KB_POSTGRES_SIMILARITY_THRESHOLD
+                                        and rerank_score >= settings.KB_POSTGRES_RERANK_THRESHOLD
+                                    ):
+                                        filtered.append(doc)
+                                else:
+                                    if similarity >= settings.KB_POSTGRES_SIMILARITY_THRESHOLD:
+                                        filtered.append(doc)
+                            results = filtered[:effective_top_k]
+                            kb_logger.info(
+                                "✅ PostgreSQL 返回 {} 条结果，过滤后保留 {} 条",
+                                len(data_results),
+                                len(results),
+                            )
+                        else:
+                            kb_logger.warning("Unexpected PostgreSQL search payload structure: {}", body)
+                    else:
+                        error_text = await response.text()
+                        kb_logger.warning("PostgreSQL KB search failed ({}): {}", response.status, error_text)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            kb_logger.error("PostgreSQL knowledge search error: {}", exc)
+        return results
+
+    async def _query_milvus(question: str) -> List[Dict[str, Any]]:
+        """Query Milvus vector store and return formatted results."""
+        results: List[Dict[str, Any]] = []
+        try:
+            docs = await knowledge_service.search(
+                query=question,
+                top_k=effective_top_k,
+                similarity_threshold=settings.KB_SIMILARITY_THRESHOLD,
+                filter_expr=filter_expr,
+                filter_by_similarity=not knowledge_service.reranker.enabled,
+            )
+            for doc in docs:
+                doc_copy = dict(doc)
+                metadata_copy = dict(doc.get("metadata") or {})
+                doc_copy["metadata"] = metadata_copy
+                doc_copy["tool"] = "milvus"
+                results.append(doc_copy)
+            kb_logger.info("✅ Milvus 返回 {} 条结果", len(results))
+        except Exception as exc:  # pragma: no cover - defensive logging
+            kb_logger.error("Milvus knowledge search failed: {}", exc)
+        return results
+
     async def local_search(state: KBWorkflowState) -> Dict[str, Any]:
         """
-        优先使用 PostgreSQL pgvector 结构化查询，如果无结果再用 Milvus 兜底。
+        并行查询 PostgreSQL pgvector 和 Milvus，合并去重后返回结果。
 
         执行策略：
-        1. 优先查询 PostgreSQL（如果在工具列表中）
-        2. 如果 PostgreSQL 有结果（>= 1条），直接使用，跳过 Milvus
-        3. 如果 PostgreSQL 无结果或未被选择，查询 Milvus 作为兜底
+        1. 并行查询 PostgreSQL 和 Milvus（如果都在工具列表中且可用）
+        2. 合并两个来源的结果，按相似度排序
+        3. 如果本地无结果且允许外部搜索，回退到外部搜索
         """
         question = state.get("question", "")
         if not question.strip():
@@ -571,134 +667,69 @@ def create_kb_multi_tool_workflow(
 
         selected_tools = state.get("kb_tools") or ["postgres", "milvus"]
 
-        milvus_results: List[Dict[str, Any]] = []
-        postgres_results: List[Dict[str, Any]] = []
-
-        # Step 1: 优先查询 PostgreSQL（如果在工具列表中）
-        should_try_postgres = "postgres" in selected_tools
+        should_try_postgres = "postgres" in selected_tools and postgres_search_url
         should_try_milvus = "milvus" in selected_tools
 
-        # 确保优先级：如果同时选择了两个工具，先尝试 PostgreSQL
-        if should_try_postgres:
-            if not postgres_search_url:
-                kb_logger.warning(
-                    "PostgreSQL 工具被选中，但 INGEST_SERVICE_URL 未配置，跳过 PostgreSQL 直接使用 Milvus。"
-                )
-                # 如果 PostgreSQL 不可用，直接使用 Milvus
-                should_try_milvus = True
-            else:
-                kb_logger.info("🔍 [优先] 查询 PostgreSQL pgvector 结构化数据库...")
-                payload: Dict[str, Any] = {
-                    "query": question,
-                    "top_k": effective_top_k,
-                }
-                if settings.KB_POSTGRES_SIMILARITY_THRESHOLD is not None:
-                    payload["threshold"] = settings.KB_POSTGRES_SIMILARITY_THRESHOLD
-                try:
-                    timeout_cfg = aiohttp.ClientTimeout(total=request_timeout)
-                    async with aiohttp.ClientSession(timeout=timeout_cfg) as session:
-                        async with session.post(postgres_search_url, json=payload) as response:
-                            if response.status == 200:
-                                body = await response.json()
-                                data_results = body.get("results") or []
-                                if isinstance(data_results, list):
-                                    for idx, item in enumerate(data_results):
-                                        item_copy = dict(item)
-                                        metadata_copy = dict(item_copy.get("metadata") or {})
-                                        item_copy["metadata"] = metadata_copy
-                                        item_copy["tool"] = "postgres"
-                                        similarity = (
-                                            item_copy.get("similarity")
-                                            if item_copy.get("similarity") is not None
-                                            else item_copy.get("score")
-                                        )
-                                        if similarity is not None:
-                                            try:
-                                                item_copy["similarity"] = float(similarity)
-                                            except (TypeError, ValueError):
-                                                item_copy["similarity"] = 0.0
-                                        item_copy["id"] = str(
-                                            item_copy.get("id")
-                                            or item_copy.get("document_id")
-                                            or item_copy.get("source_id")
-                                            or f"postgres_{idx}"
-                                        )
-                                        postgres_results.append(item_copy)
-                                    if postgres_results and knowledge_service.reranker.enabled:
-                                        postgres_results = await knowledge_service.reranker.rerank(
-                                            question, postgres_results, effective_top_k
-                                        )
-                                    filtered_postgres: List[Dict[str, Any]] = []
-                                    for doc in postgres_results:
-                                        similarity = float(doc.get("similarity") or doc.get("score") or 0.0)
-                                        rerank_score = float(doc.get("rerank_score") or 0.0)
-                                        if knowledge_service.reranker.enabled:
-                                            if (
-                                                similarity >= settings.KB_POSTGRES_SIMILARITY_THRESHOLD
-                                                and rerank_score >= settings.KB_POSTGRES_RERANK_THRESHOLD
-                                            ):
-                                                filtered_postgres.append(doc)
-                                        else:
-                                            if similarity >= settings.KB_POSTGRES_SIMILARITY_THRESHOLD:
-                                                filtered_postgres.append(doc)
-                                    postgres_results = filtered_postgres[:effective_top_k]
-                                    kb_logger.info(
-                                        "✅ PostgreSQL 返回 {} 条结果，过滤后保留 {} 条",
-                                        len(data_results),
-                                        len(postgres_results),
-                                    )
-                                else:
-                                    kb_logger.warning(
-                                        "Unexpected PostgreSQL search payload structure: {}",
-                                        body,
-                                    )
-                            else:
-                                error_text = await response.text()
-                                kb_logger.warning(
-                                    "PostgreSQL KB search failed ({}): {}",
-                                    response.status,
-                                    error_text,
-                                )
-                except Exception as exc:  # pragma: no cover - defensive logging
-                    kb_logger.error("PostgreSQL knowledge search error: {}", exc)
+        if not should_try_postgres and not should_try_milvus:
+            kb_logger.warning("⚠️ 未选择任何可用的知识库工具")
+            return {
+                "milvus_results": [],
+                "postgres_results": [],
+                "local_results": [],
+                "steps": ["local_search"],
+            }
 
-        # Step 2: 根据 PostgreSQL 结果决定是否需要 Milvus 兜底
-        if postgres_results and len(postgres_results) > 0:
-            # PostgreSQL 有结果，直接使用，跳过 Milvus
-            kb_logger.info(
-                "✅ PostgreSQL 有结果（{}条），直接使用结构化数据，跳过 Milvus 向量查询",
-                len(postgres_results)
-            )
-            combined_results = postgres_results
+        # 并行查询 PostgreSQL 和 Milvus
+        kb_logger.info("🔍 并行查询 PostgreSQL + Milvus...")
+        postgres_task = _query_postgres(question) if should_try_postgres else None
+        milvus_task = _query_milvus(question) if should_try_milvus else None
+
+        tasks = [t for t in (postgres_task, milvus_task) if t is not None]
+        if tasks:
+            gathered = await asyncio.gather(*tasks, return_exceptions=True)
         else:
-            # PostgreSQL 无结果或不可用，使用 Milvus 兜底
-            if should_try_milvus:
-                if not postgres_results:
-                    kb_logger.info("⚠️ PostgreSQL 无结果，使用 Milvus 向量库兜底...")
-                else:
-                    kb_logger.info("⚠️ PostgreSQL 不可用，使用 Milvus 向量库...")
+            gathered = []
 
-                try:
-                    docs = await knowledge_service.search(
-                        query=question,
-                        top_k=effective_top_k,
-                        similarity_threshold=settings.KB_SIMILARITY_THRESHOLD,
-                        filter_expr=filter_expr,
-                        filter_by_similarity=not knowledge_service.reranker.enabled,
-                    )
-                    for doc in docs:
-                        doc_copy = dict(doc)
-                        metadata_copy = dict(doc.get("metadata") or {})
-                        doc_copy["metadata"] = metadata_copy
-                        doc_copy["tool"] = "milvus"
-                        milvus_results.append(doc_copy)
-                    kb_logger.info("✅ Milvus 兜底返回 {} 条结果", len(milvus_results))
-                except Exception as exc:  # pragma: no cover - defensive logging
-                    kb_logger.error("Milvus knowledge search failed: {}", exc)
-                combined_results = milvus_results
+        postgres_results: List[Dict[str, Any]] = []
+        milvus_results: List[Dict[str, Any]] = []
+
+        idx = 0
+        if should_try_postgres:
+            result = gathered[idx]
+            idx += 1
+            if isinstance(result, Exception):
+                kb_logger.error("PostgreSQL query exception: {}", result)
             else:
-                kb_logger.warning("⚠️ 未选择任何可用的知识库工具")
-                combined_results = []
+                postgres_results = result
+        if should_try_milvus:
+            result = gathered[idx]
+            if isinstance(result, Exception):
+                kb_logger.error("Milvus query exception: {}", result)
+            else:
+                milvus_results = result
+
+        # 合并结果：优先 PostgreSQL，再追加 Milvus（去重）
+        seen_ids: set = set()
+        combined: List[Dict[str, Any]] = []
+        for doc in postgres_results:
+            doc_id = doc.get("id", "")
+            if doc_id not in seen_ids:
+                seen_ids.add(doc_id)
+                combined.append(doc)
+        for doc in milvus_results:
+            doc_id = doc.get("id", "")
+            if doc_id not in seen_ids:
+                seen_ids.add(doc_id)
+                combined.append(doc)
+
+        # 按相似度排序
+        combined.sort(key=lambda d: float(d.get("similarity") or d.get("rerank_score") or 0.0), reverse=True)
+        combined_results = combined[:effective_top_k]
+
+        kb_logger.info(
+            "📊 并行查询完成: PostgreSQL {} 条 + Milvus {} 条 → 合并去重 {} 条",
+            len(postgres_results), len(milvus_results), len(combined_results),
+        )
 
         route = state.get("route", "local")
         if (

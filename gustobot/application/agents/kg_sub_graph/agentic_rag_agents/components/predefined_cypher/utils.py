@@ -1,11 +1,71 @@
-import json
 import re
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-from langchain_core.prompts import ChatPromptTemplate
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+
+
+# ── 正则参数提取（纯规则，不调 LLM，稳）──
+
+_FLAVOR_NAMES = [
+    "麻辣", "香辣", "酸辣", "酸甜", "甜酸", "咸鲜", "酱香", "清淡",
+    "孜然", "咖喱", "蒜香", "葱香", "椒盐", "黑椒", "鱼香", "怪味",
+    "红油", "麻酱", "姜汁", "芥末", "陈皮", "五香", "烟熏", "糟香",
+]
+
+
+def _extract_params_by_rules(
+    user_question: str, param_names: List[str]
+) -> Dict[str, str]:
+    """从用户问题中用正则提取参数，不依赖 LLM。"""
+    params: Dict[str, str] = {}
+    for name in param_names:
+        value = None
+        if name == "dish_name":
+            # 匹配中文菜名：2-6个汉字的连续序列，优先匹配"XX菜"或"XX怎么做"前面的部分
+            m = re.search(r"([一-鿿]{2,6})(?:的|这道|那道|菜|怎么做|如何做|做法|食材|配料|口味|工艺|步骤|是什么|有什么|介绍|推荐)", user_question)
+            if m:
+                value = m.group(1)
+            else:
+                # 兜底：取前2-5个连续汉字
+                m = re.search(r"([一-鿿]{2,5})", user_question)
+                if m:
+                    value = m.group(1)
+        elif name == "ingredient_name":
+            m = re.search(r"([一-鿿]{2,4})(?:食材|材料|用料|原料)", user_question)
+            if m:
+                value = m.group(1)
+            elif "食材" in user_question or "材料" in user_question or "用什么" in user_question:
+                m = re.search(r"用\s*([一-鿿]{2,4})", user_question)
+                if m:
+                    value = m.group(1)
+        elif name == "flavor_name":
+            for fname in _FLAVOR_NAMES:
+                if fname in user_question:
+                    value = fname
+                    break
+        elif name == "method_name":
+            m = re.search(r"([一-鿿]{1,3})(?:工艺|做法|烹饪|技法)", user_question)
+            if m:
+                value = m.group(1)
+            elif "炒" in user_question: value = "炒"
+            elif "蒸" in user_question: value = "蒸"
+            elif "炖" in user_question: value = "炖"
+            elif "煮" in user_question: value = "煮"
+            elif "烤" in user_question: value = "烤"
+            elif "炸" in user_question: value = "炸"
+        elif name == "step_order":
+            m = re.search(r"第\s*(\d+)\s*步", user_question)
+            if m:
+                value = m.group(1)
+        elif name == "type_name":
+            m = re.search(r"([一-鿿]{2,3})(?:类型|分类|大类)", user_question)
+            if m:
+                value = m.group(1)
+        if value:
+            params[name] = value.strip()
+    return params
 
 
 class VectorQueryMatcher:
@@ -21,7 +81,7 @@ class VectorQueryMatcher:
         self.query_descriptions = query_descriptions
         self.similarity_threshold = similarity_threshold
 
-        self._vectorizer = TfidfVectorizer()
+        self._vectorizer = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 4))
         self._query_vectors = self._compute_query_vectors()
 
     def _compute_query_vectors(self) -> Dict[str, np.ndarray]:
@@ -76,6 +136,7 @@ class VectorQueryMatcher:
     def extract_parameters(
         self, user_question: str, query_name: str, llm: Any | None = None
     ) -> Dict[str, str]:
+        """纯正则提取参数，不依赖 LLM，避免 JSON 解析失败。"""
         if query_name not in self.predefined_cypher_dict:
             return {}
 
@@ -84,75 +145,7 @@ class VectorQueryMatcher:
         if not param_names:
             return {}
 
-        if llm is not None:
-            llm_params = self._extract_parameters_with_llm(
-                user_question, param_names, query_name, llm
-            )
-            if llm_params:
-                return llm_params
-
-        return self._extract_parameters_with_rules(user_question, param_names)
-
-    @staticmethod
-    def _extract_parameters_with_rules(
-        user_question: str, param_names: List[str]
-    ) -> Dict[str, str]:
-        params: Dict[str, str] = {}
-        for name in param_names:
-            if name == "dish_name":
-                match = re.search(r"(?:菜|菜品|做|叫)?([^\s，。,]+)", user_question)
-                if match:
-                    params[name] = match.group(1)
-            elif name == "ingredient_name":
-                match = re.search(r"(?:食材|材料|用|加)([^\s，。,]+)", user_question)
-                if match:
-                    params[name] = match.group(1)
-            elif name == "flavor_name":
-                match = re.search(r"(麻辣|清淡|酸辣|咸鲜|甜味|香辣)", user_question)
-                if match:
-                    params[name] = match.group(1)
-        return params
-
-    @staticmethod
-    def _extract_parameters_with_llm(
-        user_question: str,
-        param_names: List[str],
-        query_name: str,
-        llm: Any,
-    ) -> Dict[str, str]:
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    "你是参数提取助手，从用户问题中提取指定参数，输出 JSON，不要额外说明。",
-                ),
-                (
-                    "human",
-                    f"""用户问题: {user_question}
-查询类型: {query_name}
-需要提取的参数: {', '.join(param_names)}
-
-请以 JSON 返回，形如: {{"参数名": "参数值"}}""",
-                ),
-            ]
-        )
-
-        response = llm.invoke(prompt.format_prompt())
-        content = getattr(response, "content", "") or ""
-        try:
-            match = re.search(r"{.*}", content, re.DOTALL)
-            if not match:
-                return {}
-            parsed = json.loads(match.group(0))
-            if isinstance(parsed, dict):
-                return {
-                    str(k): str(v)
-                    for k, v in parsed.items()
-                    if v is not None and str(v).strip()
-                }
-        except Exception as exc:  # pragma: no cover - defensive logging
-            print(f"无法解析LLM响应为JSON: {exc}")
-        return {}
+        return _extract_params_by_rules(user_question, param_names)
 
 
 def create_vector_query_matcher(

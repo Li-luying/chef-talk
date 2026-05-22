@@ -130,7 +130,7 @@ def create_tool_selection_node(
                 },
             )
 
-        if _looks_like_sql_question(question_text) and route_type == "text2sql-query":
+        if _looks_like_sql_question(question_text) and route_type == "stats-query":
             logger.info("Detect text2sql intent via route_type/keywords，直接调用 Text2SQL 工具。")
             return _make_command(
                 "text2sql_query",
@@ -143,8 +143,8 @@ def create_tool_selection_node(
             )
 
         # Heuristic for GraphRAG/LightRAG - 改为让 LLM 动态选择工具，而不是硬编码
-        # if route_type == "graphrag-query":
-        #     logger.info("Router 标记为 graphrag-query，优先使用 GraphRAG 工具。")
+        # if route_type == "recipe-query":
+        #     logger.info("Router 标记为 recipe-query，优先使用 GraphRAG 工具。")
         #     return _make_command(
         #         "customer_tools",
         #         {

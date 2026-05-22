@@ -101,6 +101,34 @@ class Settings(BaseSettings):
     RERANK_TIMEOUT: int = Field(default=30, description="Rerank API timeout in seconds")
     RERANK_SCORE_FUSION_ALPHA: Optional[float] = Field(default=None, description="Score fusion alpha parameter")
 
+    # Prompt caching (automatic prefix caching for OpenAI-compatible APIs)
+    PROMPT_CACHE_ENABLED: bool = Field(
+        default=True,
+        description="Enable prompt caching for repeated system prompts (saves ~90% system-prompt tokens)",
+    )
+
+    # Hybrid retrieval (BM25 + RRF)
+    HYBRID_SEARCH_ENABLED: bool = Field(
+        default=False,
+        description="Enable hybrid dense-sparse search with RRF fusion",
+    )
+    HYBRID_BM25_INDEX_PATH: str = Field(
+        default="./data/kb/bm25_index.pkl",
+        description="On-disk path for the BM25 index pickle",
+    )
+    HYBRID_RRF_K: int = Field(
+        default=60,
+        description="Reciprocal Rank Fusion constant k",
+    )
+    HYBRID_DENSE_WEIGHT: float = Field(
+        default=1.0,
+        description="Weight multiplier for dense rank scores in RRF",
+    )
+    HYBRID_SPARSE_WEIGHT: float = Field(
+        default=1.0,
+        description="Weight multiplier for sparse rank scores in RRF",
+    )
+
     # Legacy reranker compatibility
     @property
     def RERANKER_PROVIDER(self) -> str:
@@ -139,6 +167,16 @@ class Settings(BaseSettings):
         description="Default number of search results to return",
     )
 
+    # Redis — checkpointing (langgraph graph state persistence)
+    CHECKPOINT_REDIS_DB: int = Field(
+        default=1,
+        description="Redis DB index for langgraph checkpointer (segregated from cache)",
+    )
+    CHECKPOINT_TTL: int = Field(
+        default=3600,
+        description="TTL in seconds for checkpoint entries in Redis",
+    )
+
     # Redis cache
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
@@ -170,8 +208,8 @@ class Settings(BaseSettings):
         description="LightRAG 工作目录，用于存储索引和缓存"
     )
     LIGHTRAG_RETRIEVAL_MODE: str = Field(
-        default="hybrid",
-        description="LightRAG 检索模式: local, global, hybrid, naive, mix, bypass"
+        default="local",
+        description="LightRAG 检索模式: local（仅检索，快）, global, hybrid, naive, mix, bypass"
     )
     LIGHTRAG_TOP_K: int = Field(
         default=10,
@@ -212,8 +250,16 @@ class Settings(BaseSettings):
     NEO4J_INGREDIENT_JSON_PATH: Optional[str] = "data/excipients.json"
 
     # Agent behaviour
-    MAX_ITERATIONS: int = 10
+    MAX_ITERATIONS: int = 2
     AGENT_TIMEOUT: int = 300
+    USE_REACT_AGENT: bool = Field(
+        default=False,
+        description="Use ReAct Agent (iterative Think→Act→Observe loop) instead of fixed DAG for KG queries",
+    )
+    USE_MULTI_AGENT: bool = Field(
+        default=True,
+        description="Use Supervisor + 4 Worker multi-agent orchestration for KG queries",
+    )
 
     # Knowledge base retrieval
     KB_TOP_K: int = 5
@@ -276,7 +322,7 @@ class Settings(BaseSettings):
         description="Whether external Excel ingestion should default to incremental updates",
     )
     FILE_UPLOAD_MAX_MB: int = Field(
-        default=2,
+        default=10,
         ge=1,
         description="Maximum accepted upload file size in MB for local ingestion",
     )

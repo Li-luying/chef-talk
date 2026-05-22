@@ -294,6 +294,23 @@ class LightRAGAPI:
             raise Exception(f"文档插入失败: {str(e)}")
 
 
+# 全局 LightRAG API 单例，避免每次查询重新初始化
+_lightrag_api: Optional[LightRAGAPI] = None
+
+
+def get_lightrag_api() -> LightRAGAPI:
+    """获取 LightRAG API 单例，首次调用时初始化。"""
+    global _lightrag_api
+    if _lightrag_api is None:
+        _lightrag_api = LightRAGAPI(
+            working_dir=settings.LIGHTRAG_WORKING_DIR,
+            retrieval_mode=settings.LIGHTRAG_RETRIEVAL_MODE,
+            top_k=settings.LIGHTRAG_TOP_K,
+            max_token_size=settings.LIGHTRAG_MAX_TOKEN_SIZE,
+        )
+    return _lightrag_api
+
+
 def create_lightrag_query_node(
 ) -> Callable[
     [Dict[str, Any]],
@@ -322,8 +339,8 @@ def create_lightrag_query_node(
             errors.append("未提供查询文本")
         else:
             try:
-                # 创建 LightRAG API 实例
-                lightrag_api = LightRAGAPI()
+                # 复用全局 LightRAG API 单例，避免重复初始化
+                lightrag_api = get_lightrag_api()
 
                 # 调用 LightRAG API 获取数据
                 search_result = await lightrag_api.query(query)

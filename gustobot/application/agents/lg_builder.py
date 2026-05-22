@@ -15,7 +15,7 @@ from gustobot.config import settings
 from gustobot.infrastructure.core.logger import get_logger
 from typing import cast, Literal, List, Dict, Any, Optional
 from langchain_core.messages import BaseMessage
-from langgraph.checkpoint.memory import MemorySaver
+from gustobot.application.services.redis_checkpointer import RedisCheckpointer
 from langgraph.graph import END, START, StateGraph
 from gustobot.application.agents.lg_states import AgentState, InputState, Router, GradeHallucinations
 from gustobot.application.agents.kg_sub_graph.agentic_rag_agents.retrievers.cypher_examples.recipe_retriever import \
@@ -27,7 +27,7 @@ from gustobot.application.agents.kg_sub_graph.agentic_rag_agents.workflows.multi
 )
 from gustobot.application.agents.kg_sub_graph.kg_neo4j_conn import get_neo4j_graph
 from pydantic import BaseModel, Field
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables.base import Runnable
 from gustobot.application.agents.kg_sub_graph.agentic_rag_agents.components.utils.utils import \
     retrieve_and_parse_schema_from_graph_for_prompts
@@ -44,7 +44,13 @@ import io
 
 from langchain_openai import ChatOpenAI
 from gustobot.application.agents.kb_tools import create_knowledge_query_node, KnowledgeQueryInputState
+from gustobot.application.services.prompt_cache import prepend_system_prompt
 from gustobot.infrastructure.knowledge import KnowledgeService
+from gustobot.infrastructure.file_parsers import (
+    extract_text_from_pdf,
+    extract_text_from_docx,
+    extract_text_from_doc,
+)
 class AdditionalGuardrailsOutput(BaseModel):
     """
     格式化输出，用于判断用户的问题是否与图谱内容相关
@@ -67,7 +73,7 @@ def _ensure_router(router_obj: Any, *, fallback_question: str = "") -> Router:
             return Router.model_validate(router_obj)
         except Exception:
             pass
-    return Router(type="kb-query", logic="missing router", question=fallback_question)
+    return Router(type="culture-query", logic="missing router", question=fallback_question)
 
 
 def _extract_configurable(config: Any) -> Dict[str, Any]:
@@ -128,16 +134,15 @@ async def analyze_and_route_query(
     )
 
     # 拼接提示模版 + 用户的实时问题（包含历史上下文对话）
-    messages = [
-                   {"role": "system", "content": ROUTER_SYSTEM_PROMPT}
-               ] + state.messages
+    # System prompt 固定前缀放在最前，利用 API 自动 prompt caching 省 token
+    messages = prepend_system_prompt(ROUTER_SYSTEM_PROMPT, state.messages)
     logger.info("-----Analyze user query type-----")
     logger.info(f"History messages: {state.messages}")
 
     question_text = state.messages[-1].content if state.messages else ""
     heuristic_router = _heuristic_router(question_text)
     fallback_router: Router = heuristic_router or Router(
-        type="kb-query",
+        type="culture-query",
         logic="fallback: default to knowledge base routing",
         question=question_text,
     )
@@ -145,11 +150,11 @@ async def analyze_and_route_query(
     allowed_types: set[str] = {
         "general-query",
         "additional-query",
-        "kb-query",
-        "graphrag-query",
+        "culture-query",
+        "recipe-query",
         "image-query",
         "file-query",
-        "text2sql-query",
+        "stats-query",
     }
 
     try:
@@ -174,7 +179,7 @@ async def analyze_and_route_query(
             return {"router": sanitized}
         return {
             "router": Router(
-                type="kb-query",
+                type="culture-query",
                 logic=logic or "fallback: invalid router output",
                 question=question_text,
             )
@@ -208,7 +213,7 @@ def route_query(
     """
     router = _ensure_router(getattr(state, "router", None), fallback_question=state.messages[-1].content if state.messages else "")
     state.router = router
-    _type = router.type or "kb-query"
+    _type = router.type or "culture-query"
 
     # 检查配置中是否有图片或文件路径，如果有，优先对应处理
     if hasattr(state, "config") and state.config:
@@ -224,13 +229,13 @@ def route_query(
         return "respond_to_general_query"
     elif _type == "additional-query":
         return "get_additional_info"
-    elif _type in ("graphrag-query", "text2sql-query"):  # 图查询或结构化问数
+    elif _type in ("recipe-query", "stats-query"):  # 图查询或结构化问数
         return "create_research_plan"
     elif _type == "image-query":
         return "create_image_query"
     elif _type == "file-query":
         return "create_file_query"
-    elif _type=="kb-query":
+    elif _type=="culture-query":
         return "create_kb_query"
     else:
         raise ValueError(f"Unknown router type {_type}")
@@ -249,20 +254,24 @@ async def respond_to_general_query(
     """
     logger.info("-----generate general-query response-----")
 
-    # 使用大模型生成回复
-    model = ChatOpenAI(openai_api_key=settings.OPENAI_API_KEY, model_name=settings.OPENAI_MODEL,
-                       openai_api_base=settings.OPENAI_API_BASE, temperature=0.7,
-                       tags=["general_query"])
+    try:
+        # 使用大模型生成回复
+        model = ChatOpenAI(openai_api_key=settings.OPENAI_API_KEY, model_name=settings.OPENAI_MODEL,
+                           openai_api_base=settings.OPENAI_API_BASE, temperature=0.7,
+                           tags=["general_query"])
 
-    router = _ensure_router(getattr(state, "router", None), fallback_question=state.messages[-1].content if state.messages else "")
-    state.router = router
-    system_prompt = GENERAL_QUERY_SYSTEM_PROMPT.format(
-        logic=router.logic
-    )
+        router = _ensure_router(getattr(state, "router", None), fallback_question=state.messages[-1].content if state.messages else "")
+        state.router = router
+        system_prompt = GENERAL_QUERY_SYSTEM_PROMPT.format(
+            logic=router.logic
+        )
 
-    messages = [{"role": "system", "content": system_prompt}] + state.messages
-    response = await model.ainvoke(messages)
-    return {"messages": [response]}
+        messages = prepend_system_prompt(system_prompt, state.messages)
+        response = await model.ainvoke(messages)
+        return {"messages": [response]}
+    except Exception as e:
+        logger.error(f"respond_to_general_query failed: {e}", exc_info=True)
+        return {"messages": [AIMessage(content="亲～抱歉，处理您的消息时遇到了点小问题，请您重新描述一下需求吧～😊")]}
 
 #大模型生成输出多了一些额外消息
 async def get_additional_info(
@@ -353,30 +362,34 @@ async def get_additional_info(
     )
 
     # 构建格式化输出的 Chain， 如果匹配，返回 continue，否则返回 end
-    guardrails_chain = full_system_prompt | model.with_structured_output(AdditionalGuardrailsOutput)
-    guardrails_output: AdditionalGuardrailsOutput = await guardrails_chain.ainvoke(
-        {"question": state.messages[-1].content if state.messages else ""}
-    )
-
-    # 空值检查：如果 LLM 返回 None，默认为 proceed
-    if guardrails_output is None:
-        logger.warning("Guardrails returned None, defaulting to proceed")
-        guardrails_output = AdditionalGuardrailsOutput(decision="proceed")
-
-    # 根据格式化输出的结果，返回不同的响应
-    if guardrails_output.decision == "end":
-        logger.info("-----Fail to pass guardrails check-----")
-        return {"messages": [AIMessage(content="厨友您好～抱歉哦，这个问题不太属于我们的菜谱范围呢，我主要帮您解答菜谱和烹饪方面的问题～😊")]}
-    else:
-        logger.info("-----Pass guardrails check-----")
-        router = _ensure_router(getattr(state, "router", None), fallback_question=state.messages[-1].content if state.messages else "")
-        state.router = router
-        system_prompt = GET_ADDITIONAL_SYSTEM_PROMPT.format(
-            logic=router.logic
+    try:
+        guardrails_chain = full_system_prompt | model.with_structured_output(AdditionalGuardrailsOutput)
+        guardrails_output: AdditionalGuardrailsOutput = await guardrails_chain.ainvoke(
+            {"question": state.messages[-1].content if state.messages else ""}
         )
-        messages = [{"role": "system", "content": system_prompt}] + state.messages
-        response = await model.ainvoke(messages)
-        return {"messages": [response]}
+
+        # 空值检查：如果 LLM 返回 None，默认为 proceed
+        if guardrails_output is None:
+            logger.warning("Guardrails returned None, defaulting to proceed")
+            guardrails_output = AdditionalGuardrailsOutput(decision="proceed")
+
+        # 根据格式化输出的结果，返回不同的响应
+        if guardrails_output.decision == "end":
+            logger.info("-----Fail to pass guardrails check-----")
+            return {"messages": [AIMessage(content="厨友您好～抱歉哦，这个问题不太属于我们的菜谱范围呢，我主要帮您解答菜谱和烹饪方面的问题～😊")]}
+        else:
+            logger.info("-----Pass guardrails check-----")
+            router = _ensure_router(getattr(state, "router", None), fallback_question=state.messages[-1].content if state.messages else "")
+            state.router = router
+            system_prompt = GET_ADDITIONAL_SYSTEM_PROMPT.format(
+                logic=router.logic
+            )
+            messages = prepend_system_prompt(system_prompt, state.messages)
+            response = await model.ainvoke(messages)
+            return {"messages": [response]}
+    except Exception as e:
+        logger.error(f"get_additional_info failed: {e}", exc_info=True)
+        return {"messages": [AIMessage(content="厨友您好～抱歉，处理您的需求时遇到了点问题，请您重新描述一下，我会尽力帮您～😊")]}
 
 
 async def _generate_image(user_query: str, state: AgentState) -> Dict[str, List[BaseMessage]]:
@@ -602,7 +615,7 @@ async def create_image_query(
                     system_prompt = GET_IMAGE_SYSTEM_PROMPT.format(
                         image_description=image_description
                     )
-                    messages = [{"role": "system", "content": system_prompt}] + state.messages
+                    messages = prepend_system_prompt(system_prompt, state.messages)
                     response = await model.ainvoke(messages)
                     return {"messages": [response]}
 
@@ -679,8 +692,14 @@ async def create_file_query(
             import json
             data = json.loads(p.read_text(encoding="utf-8", errors="ignore"))
             raw_text = json.dumps(data, ensure_ascii=False, indent=2)
+        elif suffix == ".pdf":
+            raw_text = await extract_text_from_pdf(p)
+        elif suffix == ".docx":
+            raw_text = await extract_text_from_docx(p)
+        elif suffix == ".doc":
+            raw_text = await extract_text_from_doc(p)
         else:
-            return {"messages": [AIMessage(content=f"暂不支持该文件类型：{suffix}。当前仅支持 .txt/.md/.json/.csv/.log/.xlsx/.xls。")]}
+            return {"messages": [AIMessage(content=f"暂不支持该文件类型：{suffix}。当前仅支持 .txt/.md/.json/.csv/.log/.xlsx/.xls/.pdf/.docx。")]}
 
         import uuid
         doc_id = f"upload_{p.stem}_{uuid.uuid4().hex[:6]}"
@@ -704,6 +723,9 @@ async def create_file_query(
         kb_result = await knowledge_node(input_state)
         answer_text = kb_result.get("answer") or f"文件《{title}》已上传并加入知识库，可直接对我提问相关内容。"
         return {"messages": [AIMessage(content=answer_text)]}
+    except ValueError as ve:
+        logger.warning("File parsing failed (recoverable): %s", ve)
+        return {"messages": [AIMessage(content=str(ve))]}
     except Exception as exc:
         logger.exception("Failed to ingest uploaded file: %s", exc)
         return {"messages": [AIMessage(content="文件导入出现异常，请稍后再试或联系管理员。")]}
@@ -746,7 +768,7 @@ async def create_kb_query(
         if not external_url and settings.INGEST_SERVICE_URL:
             external_url = f"{settings.INGEST_SERVICE_URL.rstrip('/')}/api/search"
 
-        workflow = create_kb_multi_tool_workflow(
+        workflow = _get_cached_kb_multi_tool_workflow(
             llm=llm,
             knowledge_service=knowledge_service,
             top_k=kb_top_k,
@@ -774,6 +796,10 @@ async def create_kb_query(
         answer_text = response.get("answer") or "检索完成，但暂时没有可以分享的结果。"
         sources = response.get("sources", [])
 
+        # 如果 KB 返回空结果，用 LLM 自身知识兜底
+        if _looks_like_empty_result(answer_text):
+            answer_text = await _llm_standalone_answer(last_message)
+
         # 创建包含sources的AIMessage
         ai_message = AIMessage(content=answer_text)
         # 将sources附加到消息的additional_kwargs中
@@ -798,6 +824,8 @@ async def create_kb_query(
     }
     result = await knowledge_node(input_state)
     answer_text = result.get("answer", "") or "抱歉，我暂时无法从知识库中找到答案。"
+    if _looks_like_empty_result(answer_text):
+        answer_text = await _llm_standalone_answer(last_message)
     return {"messages": [AIMessage(content=answer_text)]}
 
 # 图工具 查询节点
@@ -815,99 +843,188 @@ async def create_research_plan(
     """
     logger.info("------execute local knowledge base query------")
 
-    # 使用大模型生成查询/多跳、并行查询计划
-    if not settings.OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY is not configured for research plan generation.")
-
-    model = ChatOpenAI(
-        openai_api_key=settings.OPENAI_API_KEY,
-        openai_api_base=settings.OPENAI_API_BASE,
-        model_name=settings.OPENAI_MODEL,
-        temperature=0.7,
-        tags=["research_plan"],
-    )
-
-    # 初始化必要参数
-    #  Neo4j图数据库连接 - 使用配置中的连接信息
-    neo4j_graph=None
-    try:
-        neo4j_graph = get_neo4j_graph()
-        logger.info("success to get Neo4j graph database connection")
-    except Exception as e:
-        logger.error(f"failed to get Neo4j graph database connection: {e}")
-
-    #  创建菜谱场景的检索器实例，根据 Graph Schema创建 Cypher ， 优先生成对应问题的cypher模版 用来引导大模型生成正确的Cypher查询语句
-    cypher_retriever = RecipeCypherRetriever()
-
-    #  定义工具模式列表
-    from gustobot.application.agents.kg_sub_graph.kg_tools_list import (
-        cypher_query,
-        predefined_cypher,
-        microsoft_graphrag_query,
-        text2sql_query,
-    )
-    tool_schemas: List[type[BaseModel]] = [
-        cypher_query,
-        predefined_cypher,
-        microsoft_graphrag_query,
-        text2sql_query,
-    ]
-
-    #  预定义的Cypher查询 为菜谱场景定义有用的查询
-    from gustobot.application.agents.kg_sub_graph.agentic_rag_agents.components.predefined_cypher.cypher_dict import \
-        predefined_cypher_dict
-
-    # 定义菜谱助手服务范围
-    scope_description = """
-    菜谱智能助手服务范围：为您提供全方位的烹饪指导和美食知识，包括但不限于：
-
-    🍳 菜谱查询与制作指导
-    - 各类中华料理的详细做法和烹饪技巧
-    - 食材用量、烹饪时长、火候掌握
-    - 分步骤的烹饪指导和小贴士
-
-    🥬 食材知识与营养价值
-    - 食材的营养成分和健康功效
-    - 食材的选购、储存和处理方法
-    - 食材之间的搭配和替代建议
-
-    🌶️ 口味与烹饪技法
-    - 各种口味特点（麻辣、酱香、清淡等）
-    - 不同烹饪方法（炒、蒸、煮、炖、烤等）
-    - 菜品分类（热菜、凉菜、汤品、主食等）
-
-    💊 食疗养生建议
-    - 食材的中医食疗功效
-    - 季节性饮食调理建议
-    - 特定人群的饮食注意事项
-
-    暂不支持：政治、娱乐八卦、新闻时事、天气预报、网购推荐、医疗诊断等非烹饪美食相关内容。
-    """
-
-    # 创建多工具工作流
-    multi_tool_workflow = create_multi_tool_workflow(
-        llm=model,
-        graph=neo4j_graph,
-        tool_schemas=tool_schemas,
-        predefined_cypher_dict=predefined_cypher_dict,
-        cypher_example_retriever=cypher_retriever,
-        scope_description=scope_description,
-        llm_cypher_validation=True,
-    )
-
-    # return multi_tool_workflow
-    # 准备输入状态
     last_message = state.messages[-1].content if state.messages else ""
-    input_state = {
-        "question": last_message,
-        "data": [],
-        "history": [],
-        "route_type": _ensure_router(getattr(state, "router", None)).type,
-    }
 
-    # 执行工作流
-    response = await multi_tool_workflow.ainvoke(input_state)
-    return {"messages": [AIMessage(content=response["answer"])]}
+    try:
+        # 使用大模型生成查询/多跳、并行查询计划
+        if not settings.OPENAI_API_KEY:
+            raise RuntimeError("OPENAI_API_KEY is not configured for research plan generation.")
+
+        model = ChatOpenAI(
+            openai_api_key=settings.OPENAI_API_KEY,
+            openai_api_base=settings.OPENAI_API_BASE,
+            model_name=settings.OPENAI_MODEL,
+            temperature=0.7,
+            tags=["research_plan"],
+        )
+
+        # 初始化必要参数
+        #  Neo4j图数据库连接 - 使用配置中的连接信息
+        neo4j_graph=None
+        try:
+            neo4j_graph = get_neo4j_graph()
+            logger.info("success to get Neo4j graph database connection")
+        except Exception as e:
+            logger.error(f"failed to get Neo4j graph database connection: {e}")
+
+        #  创建菜谱场景的检索器实例，根据 Graph Schema创建 Cypher ， 优先生成对应问题的cypher模版 用来引导大模型生成正确的Cypher查询语句
+        cypher_retriever = RecipeCypherRetriever()
+
+        #  定义工具模式列表
+        from gustobot.application.agents.kg_sub_graph.kg_tools_list import (
+            cypher_query,
+            predefined_cypher,
+            microsoft_graphrag_query,
+            text2sql_query,
+        )
+        tool_schemas: List[type[BaseModel]] = [
+            cypher_query,
+            predefined_cypher,
+            microsoft_graphrag_query,
+            text2sql_query,
+        ]
+
+        #  预定义的Cypher查询 为菜谱场景定义有用的查询
+        from gustobot.application.agents.kg_sub_graph.agentic_rag_agents.components.predefined_cypher.cypher_dict import \
+            predefined_cypher_dict
+
+        # 定义菜谱助手服务范围
+        scope_description = """
+        菜谱智能助手服务范围：为您提供全方位的烹饪指导和美食知识，包括但不限于：
+
+        🍳 菜谱查询与制作指导
+        - 各类中华料理的详细做法和烹饪技巧
+        - 食材用量、烹饪时长、火候掌握
+        - 分步骤的烹饪指导和小贴士
+
+        🥬 食材知识与营养价值
+        - 食材的营养成分和健康功效
+        - 食材的选购、储存和处理方法
+        - 食材之间的搭配和替代建议
+
+        🌶️ 口味与烹饪技法
+        - 各种口味特点（麻辣、酱香、清淡等）
+        - 不同烹饪方法（炒、蒸、煮、炖、烤等）
+        - 菜品分类（热菜、凉菜、汤品、主食等）
+
+        💊 食疗养生建议
+        - 食材的中医食疗功效
+        - 季节性饮食调理建议
+        - 特定人群的饮食注意事项
+
+        暂不支持：政治、娱乐八卦、新闻时事、天气预报、网购推荐、医疗诊断等非烹饪美食相关内容。
+        """
+
+        # 创建多工具工作流（使用缓存避免重复编译）
+        multi_tool_workflow = _get_cached_multi_tool_workflow(
+            llm=model,
+            graph=neo4j_graph,
+            tool_schemas=tool_schemas,
+            predefined_cypher_dict=predefined_cypher_dict,
+            cypher_example_retriever=cypher_retriever,
+            scope_description=scope_description,
+            llm_cypher_validation=True,
+        )
+
+        # ── 多 Agent 协作分支 ──
+        if getattr(settings, "USE_MULTI_AGENT", False):
+            from gustobot.application.agents.multi_agent.supervisor import create_supervisor_agent
+
+            global _cached_supervisor_agent
+            if _cached_supervisor_agent is None:
+                _cached_supervisor_agent = create_supervisor_agent(
+                    neo4j_graph=neo4j_graph,
+                    llm=model,
+                    predefined_cypher_dict=predefined_cypher_dict,
+                    max_iterations=getattr(settings, "MAX_ITERATIONS", 5),
+                )
+            supervisor = _cached_supervisor_agent
+            result = await supervisor.ainvoke({
+                "messages": [HumanMessage(content=last_message)],
+                "question": last_message,
+            })
+            final_msgs = result.get("messages", [])
+            answer = ""
+            for m in reversed(final_msgs):
+                if isinstance(m, AIMessage) and m.content and not getattr(m, "tool_calls", None):
+                    answer = m.content
+                    break
+            if not answer:
+                answer = str(final_msgs[-1].content) if final_msgs else "多 Agent 协作完成，但未生成回答。"
+            if _looks_like_empty_result(answer):
+                answer = await _llm_standalone_answer(last_message)
+
+            # 提取 Supervisor 调度决策日志，透传到前端
+            agent_trace = result.get("final_decision_log") or {}
+            ai_msg = AIMessage(content=answer)
+            ai_msg.additional_kwargs["agent_trace"] = agent_trace
+            return {"messages": [ai_msg]}
+
+        # ── ReAct Agent 分支 ──
+        if getattr(settings, "USE_REACT_AGENT", False):
+            react_agent = _get_cached_react_agent(
+                neo4j_graph=neo4j_graph,
+                llm=model,
+                predefined_cypher_dict=predefined_cypher_dict,
+                max_iterations=getattr(settings, "MAX_ITERATIONS", 10),
+            )
+            result = await react_agent.ainvoke({
+                "messages": [HumanMessage(content=last_message)],
+            })
+            final_msgs = result.get("messages", [])
+            answer = ""
+            for m in reversed(final_msgs):
+                if isinstance(m, AIMessage) and m.content and not getattr(m, "tool_calls", None):
+                    answer = m.content
+                    break
+            if not answer:
+                answer = str(final_msgs[-1].content) if final_msgs else "Agent 执行完成但未生成回答。"
+            if _looks_like_empty_result(answer):
+                answer = await _llm_standalone_answer(last_message)
+            return {"messages": [AIMessage(content=answer)]}
+
+        # ── 原有固定 DAG 分支 ──
+        input_state = {
+            "question": last_message,
+            "data": [],
+            "history": [],
+            "route_type": _ensure_router(getattr(state, "router", None)).type,
+        }
+
+        # 执行工作流
+        response = await multi_tool_workflow.ainvoke(input_state)
+        answer = response["answer"]
+        if _looks_like_empty_result(answer):
+            answer = await _llm_standalone_answer(last_message)
+        return {"messages": [AIMessage(content=answer)]}
+
+    except Exception as exc:
+        logger.opt(exception=True).warning(
+            "GraphRAG query failed ({}); falling back to vector knowledge base.", exc
+        )
+        # Fallback: direct KB query (if available) or LLM standalone
+        answer_text = ""
+        try:
+            from gustobot.application.agents.kb_tools.node import (
+                create_knowledge_query_node,
+                KnowledgeQueryInputState,
+            )
+            from gustobot.infrastructure.knowledge import KnowledgeService
+            knowledge_service = KnowledgeService()
+            knowledge_node = create_knowledge_query_node(knowledge_service=knowledge_service)
+            input_state: KnowledgeQueryInputState = {
+                "task": last_message,
+                "context": {"top_k": 5},
+                "steps": ["fallback_kb_query"],
+            }
+            result = await knowledge_node(input_state)
+            answer_text = result.get("answer", "") or ""
+        except Exception as kb_exc:
+            logger.warning("KB fallback unavailable ({}), using LLM standalone.", kb_exc)
+
+        if not answer_text or _looks_like_empty_result(answer_text):
+            answer_text = await _llm_standalone_answer(last_message)
+        return {"messages": [AIMessage(content=answer_text)]}
 
 
 async def check_hallucinations(
@@ -952,7 +1069,7 @@ async def check_hallucinations(
     return {"hallucination": response}
 
 
-checkpointer = MemorySaver()
+checkpointer = RedisCheckpointer()
 
 # 定义状态图
 builder = StateGraph(AgentState, input=InputState)
@@ -971,6 +1088,97 @@ builder.add_edge(START, "analyze_and_route_query")
 builder.add_conditional_edges("analyze_and_route_query", route_query)
 
 graph = builder.compile(checkpointer=checkpointer)
+
+# ── 子图编译缓存：避免每次请求重复编译 ──
+_cached_react_agent: Any = None
+_cached_supervisor_agent: Any = None
+_cached_multi_tool_workflow: Any = None
+_cached_kb_multi_tool_workflow: Any = None
+
+
+def _get_cached_react_agent(neo4j_graph, llm, predefined_cypher_dict, max_iterations):
+    global _cached_react_agent
+    if _cached_react_agent is None:
+        from gustobot.application.agents.react_agent.agent import create_react_agent
+        _cached_react_agent = create_react_agent(
+            neo4j_graph=neo4j_graph,
+            llm=llm,
+            predefined_cypher_dict=predefined_cypher_dict,
+            max_iterations=max_iterations,
+        )
+    return _cached_react_agent
+
+
+def _get_cached_multi_tool_workflow(llm, graph, tool_schemas, predefined_cypher_dict,
+                                     cypher_example_retriever, scope_description, llm_cypher_validation):
+    global _cached_multi_tool_workflow
+    if _cached_multi_tool_workflow is None:
+        _cached_multi_tool_workflow = create_multi_tool_workflow(
+            llm=llm,
+            graph=graph,
+            tool_schemas=tool_schemas,
+            predefined_cypher_dict=predefined_cypher_dict,
+            cypher_example_retriever=cypher_example_retriever,
+            scope_description=scope_description,
+            llm_cypher_validation=llm_cypher_validation,
+        )
+    return _cached_multi_tool_workflow
+
+
+def _get_cached_kb_multi_tool_workflow(llm, knowledge_service, top_k, similarity_threshold,
+                                        filter_expr, allow_external, external_search_url):
+    global _cached_kb_multi_tool_workflow
+    if _cached_kb_multi_tool_workflow is None:
+        _cached_kb_multi_tool_workflow = create_kb_multi_tool_workflow(
+            llm=llm,
+            knowledge_service=knowledge_service,
+            top_k=top_k,
+            similarity_threshold=similarity_threshold,
+            filter_expr=filter_expr,
+            allow_external=allow_external,
+            external_search_url=external_search_url,
+        )
+    return _cached_kb_multi_tool_workflow
+
+
+# ── 空结果兜底：当工具链路全部走完但未找到数据时，直接用 LLM 知识回答 ──
+
+_EMPTY_RESULT_PATTERNS = [
+    "无法找到", "未找到", "没有收录", "暂无相关", "未能找到",
+    "找不到", "没有相关", "数据库中没有", "知识库中没有",
+    "图谱中未", "未能返回", "暂未收录", "无法查询",
+    "未检索到", "没有找到", "未能检索到",
+    "暂未找到", "暂时无法", "没有可以分享", "无法从知识库",
+    "检索完成，但暂时", "未找到相关记载",
+]
+
+
+def _looks_like_empty_result(answer: str) -> bool:
+    """检测回答是否表示'未找到结果'。"""
+    return any(pattern in answer for pattern in _EMPTY_RESULT_PATTERNS)
+
+
+async def _llm_standalone_answer(question: str) -> str:
+    """绕过所有工具，直接用 LLM 自身知识回答，附带免责声明。"""
+    from langchain_core.messages import HumanMessage, SystemMessage
+    model = ChatOpenAI(
+        openai_api_key=settings.OPENAI_API_KEY,
+        openai_api_base=settings.OPENAI_API_BASE,
+        model_name=settings.OPENAI_MODEL,
+        temperature=0.7,
+    )
+    system_prompt = (
+        "你是 GustoBot 菜谱智能助手。请用你自己的知识直接回答用户的问题。"
+        "回答要专业、准确、有条理，用中文回复，语气友好。"
+        "在回答的最后，必须添加一句声明："
+        "'💡 以上信息来自我的通用知识，暂未在菜谱数据库中得到验证，仅供参考。'"
+    )
+    response = await model.ainvoke([
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=question),
+    ])
+    return response.content
+
 
 # png_bytes = graph.get_graph().draw_mermaid_png()
 # output_path = Path(__file__).resolve().parent / "lg_builder_workflow.png"
@@ -1001,20 +1209,26 @@ def _heuristic_router(question: str) -> Optional[Router]:
         "需要什么",
         "配料",
         "用什么",
+        # 菜系名称
+        "川菜", "粤菜", "鲁菜", "苏菜", "闽菜", "浙菜", "湘菜", "徽菜",
+        "京菜", "沪菜", "东北菜", "西北菜", "客家菜", "潮汕菜", "本帮菜",
+        # 口味和技法
+        "口味", "特点", "特色", "风味", "麻辣", "清淡", "酸甜",
+        "火锅", "烧烤", "面点", "小吃", "点心", "汤羹", "凉菜",
     ]
 
     text2sql_keywords = ["统计", "多少", "总数", "数量", "排名"]
 
     if any(keyword in lowered for keyword in text2sql_keywords):
         return Router(
-            type="text2sql-query",
+            type="stats-query",
             logic="keyword fallback: text2sql",
             question=question,
         )
 
     if any(keyword in lowered for keyword in graphrag_keywords):
         return Router(
-            type="graphrag-query",
+            type="recipe-query",
             logic="keyword fallback: graphrag",
             question=question,
         )

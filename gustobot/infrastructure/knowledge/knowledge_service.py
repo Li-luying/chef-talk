@@ -12,6 +12,8 @@ from gustobot.config import settings
 from .embeddings import OpenAICompatibleEmbeddings
 from .vector_store import VectorStore
 from .reranker import Reranker
+from .bm25_index import BM25Index
+from .hybrid_retriever import rrf_fusion
 
 
 class KnowledgeService:
@@ -53,6 +55,18 @@ class KnowledgeService:
 
         self.reranker = Reranker()
 
+        # Hybrid search (BM25 sparse + dense ANN, fused by RRF)
+        self.hybrid_search_enabled = settings.HYBRID_SEARCH_ENABLED
+        self.bm25_index: Optional[BM25Index] = None
+        if self.hybrid_search_enabled:
+            self.bm25_index = BM25Index(index_path=settings.HYBRID_BM25_INDEX_PATH)
+            loaded = self.bm25_index.load()
+            logger.info(
+                "Hybrid search enabled, BM25 index %s (%d docs)",
+                "loaded" if loaded else "not found (will build on demand)",
+                self.bm25_index.get_stats()["document_count"] if loaded else 0,
+            )
+
         logger.info(
             "KnowledgeService initialised (chunk_size=%s, chunk_overlap=%s)",
             self.chunk_size,
@@ -78,6 +92,18 @@ class KnowledgeService:
         )
 
         result = await asyncio.to_thread(self._store_documents, documents, embeddings)
+
+        # Sync BM25 index with new document chunks
+        if self.hybrid_search_enabled and self.bm25_index and result.get("stored"):
+            ids = result.get("ids", [])
+            for i, doc in enumerate(documents):
+                if i < len(ids):
+                    self.bm25_index.add(
+                        document=doc.page_content,
+                        doc_id=ids[i],
+                        metadata=dict(doc.metadata),
+                    )
+
         return result
 
     async def add_document(
@@ -139,18 +165,47 @@ class KnowledgeService:
         recall_k = top_k
         if self.reranker.enabled:
             recall_k = settings.RERANK_MAX_CANDIDATES  # 召回更多文档用于重排
-
+        # 1. 把用户问题变成向量
         embedding = await asyncio.to_thread(self.embedder.embed_query, query)
-        results = await asyncio.to_thread(
-            self.vector_store.search,
-            embedding,
-            recall_k,  # 使用更大的召回数量
-            filter_expr,
-        )
 
-        candidates = results
-        if filter_by_similarity and similarity_threshold is not None:
-            candidates = [r for r in candidates if r.get("score", 0.0) >= similarity_threshold]
+        # Hybrid search: dense (Milvus ANN) + sparse (BM25) fused by RRF
+        if self.hybrid_search_enabled and self.bm25_index:
+            # 2a. Dense ANN 检索
+            dense_results = await asyncio.to_thread(
+                self.vector_store.search, embedding, recall_k, filter_expr,
+            )
+            if filter_by_similarity and similarity_threshold is not None:
+                dense_results = [
+                    r for r in dense_results if r.get("score", 0.0) >= similarity_threshold
+                ]
+
+            # 2b. Sparse BM25 检索
+            sparse_results = await asyncio.to_thread(
+                self.bm25_index.search, query, recall_k,
+            )
+
+            # 2c. RRF 融合
+            candidates = rrf_fusion(
+                dense_results,
+                sparse_results,
+                k=settings.HYBRID_RRF_K,
+                dense_weight=settings.HYBRID_DENSE_WEIGHT,
+                sparse_weight=settings.HYBRID_SPARSE_WEIGHT,
+                top_k=top_k,
+            )
+        else:
+            # 2. 标准 Milvus ANN 检索
+            results = await asyncio.to_thread(
+                self.vector_store.search,
+                embedding,
+                recall_k,
+                filter_expr,
+            )
+
+            # 3. 相似度阈值初筛
+            candidates = results
+            if filter_by_similarity and similarity_threshold is not None:
+                candidates = [r for r in candidates if r.get("score", 0.0) >= similarity_threshold]
 
         # 使用 reranker 精排
         if candidates and self.reranker.enabled:
@@ -168,7 +223,10 @@ class KnowledgeService:
         return candidates[:top_k]
 
     async def delete_recipe(self, recipe_id: str) -> bool:
-        return await asyncio.to_thread(self.vector_store.delete_documents, [recipe_id])
+        result = await asyncio.to_thread(self.vector_store.delete_documents, [recipe_id])
+        if result and self.hybrid_search_enabled and self.bm25_index:
+            self.bm25_index.delete([recipe_id])
+        return result
 
     async def get_stats(self) -> Dict[str, Any]:
         def _stats() -> Dict[str, Any]:
@@ -180,12 +238,17 @@ class KnowledgeService:
                     "embedding_model": settings.EMBEDDING_MODEL,
                 }
             )
+            if self.hybrid_search_enabled and self.bm25_index:
+                stats["bm25"] = self.bm25_index.get_stats()
             return stats
 
         return await asyncio.to_thread(_stats)
 
     async def clear(self) -> bool:
-        return await asyncio.to_thread(self.vector_store.clear_collection)
+        result = await asyncio.to_thread(self.vector_store.clear_collection)
+        if self.hybrid_search_enabled and self.bm25_index:
+            self.bm25_index.clear()
+        return result
 
     async def close(self) -> None:
         await asyncio.to_thread(self.vector_store.close)
